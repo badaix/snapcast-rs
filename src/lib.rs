@@ -3,6 +3,9 @@
 //! `snapcast protocol` implementation of the streaming protocol as defined here:
 //! https://github.com/snapcast/snapcast/blob/develop/doc/binary_protocol.md
 
+pub mod player;
+
+use log::debug;
 use std::ops;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -365,7 +368,7 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
         r#"{"Arch": "x86_64", "Auth": {"param": "YmFkYWl4OnBhc3N3ZA==", "scheme": "Basic"}, "ClientName": "Snapclient-rust", "HostName": "my_hostname", "ID": "00:11:22:33:44:55", "Instance": 1, "MAC": "00:11:22:33:44:55", "OS": "Arch Linux", "SnapStreamProtocolVersion": 2, "Version": "0.32.0"}"#,
     );
 
-    println!("Sending Hello message: {:?}", hello);
+    debug!("Sending Hello message: {:?}", hello);
     let msg: Vec<u8> = hello.serialize();
     stream.write_all(&msg).await?;
 
@@ -383,34 +386,34 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
         match base_message.msgtype {
             MessageType::CodecHeader => {
                 let codec_header = CodecHeader::deserialize(base_message, &buffer);
-                println!("Received CodecHeader message: {:?}", codec_header);
+                debug!("Received CodecHeader message: {:?}", codec_header);
             }
             MessageType::WireChunk => {
                 let wire_chunk = WireChunk::deserialize(base_message, &buffer);
-                println!("Received WireChunk message: {:?}", wire_chunk.base);
+                debug!("Received WireChunk message: {:?}", wire_chunk.base);
             }
             MessageType::ServerSettings => {
                 let server_settings = ServerSettings::deserialize(base_message, &buffer);
-                println!("Received ServerSettings message: {:?}", server_settings);
+                debug!("Received ServerSettings message: {:?}", server_settings);
             }
             MessageType::Time => {
                 let time_message = Time::deserialize(base_message, &buffer);
-                println!("Received Time message: {:?}", time_message);
+                debug!("Received Time message: {:?}", time_message);
             }
             MessageType::Hello => {
                 let hello_message = Hello::deserialize(base_message, &buffer);
-                println!("Received Hello message: {:?}", hello_message);
+                debug!("Received Hello message: {:?}", hello_message);
             }
             MessageType::ClientInfo => {
                 let client_info = ClientInfo::deserialize(base_message, &buffer);
-                println!("Received ClientInfo message: {:?}", client_info);
+                debug!("Received ClientInfo message: {:?}", client_info);
             }
             MessageType::Error => {
                 let error_message = ErrorMessage::deserialize(base_message, &buffer);
-                println!("Received Error message: {:?}", error_message);
+                debug!("Received Error message: {:?}", error_message);
             }
             _ => {
-                println!("Received other message type: {:?}", base_message.msgtype);
+                debug!("Received other message type: {:?}", base_message.msgtype);
             }
         }
     }
