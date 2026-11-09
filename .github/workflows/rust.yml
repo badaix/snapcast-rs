@@ -16,6 +16,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Print environment
+      run: env
+    - name: Install dependencies
+      run: |
+        sudo apt update && \
+        sudo apt install -yq libasound2-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
