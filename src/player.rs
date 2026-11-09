@@ -82,6 +82,12 @@ impl Player {
     }
 }
 
+impl Default for Player {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // fn write_silence<T>(data: &mut [T], _: &cpal::OutputCallbackInfo)
 // where
 //     T: Sample + FromSample<f32>,

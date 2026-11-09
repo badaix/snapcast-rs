@@ -202,8 +202,8 @@ impl Message for CodecHeader {
 
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
-        buffer.extend_from_slice(&self.codec.as_bytes().len().to_le_bytes());
-        buffer.extend_from_slice(&self.codec.as_bytes());
+        buffer.extend_from_slice(&self.codec.len().to_le_bytes());
+        buffer.extend_from_slice(self.codec.as_bytes());
         buffer.extend_from_slice(&self.payload.len().to_le_bytes());
         buffer.extend_from_slice(&self.payload);
         buffer
@@ -237,7 +237,7 @@ impl Message for ServerSettings {
         let payload = buffer[4..(4 + payload_size as usize)].to_vec();
         ServerSettings {
             base: basemessage,
-            payload: payload,
+            payload,
         }
     }
 
@@ -272,8 +272,8 @@ impl Hello {
             // base: BaseMessage::new(1, id, refers_to),
             base: BaseMessage {
                 msgtype: MessageType::Hello,
-                id: id,
-                refers_to: refers_to,
+                id,
+                refers_to,
                 sent: TimeStamp::new(0, 0),
                 received: TimeStamp::new(0, 0),
                 size: size + 4, // size of the payload plus the size field itself
@@ -295,8 +295,8 @@ impl Message for ClientInfo {
 
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
-        buffer.extend_from_slice(&(self.payload.as_bytes().len() as u32).to_le_bytes());
-        buffer.extend_from_slice(&self.payload.as_bytes());
+        buffer.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(self.payload.as_bytes());
         buffer
     }
 }
@@ -327,10 +327,10 @@ impl Message for ErrorMessage {
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         buffer.extend_from_slice(&self.code.to_le_bytes());
-        buffer.extend_from_slice(&(self.message.as_bytes().len() as u32).to_le_bytes());
-        buffer.extend_from_slice(&self.message.as_bytes());
-        buffer.extend_from_slice(&(self.details.as_bytes().len() as u32).to_le_bytes());
-        buffer.extend_from_slice(&self.details.as_bytes());
+        buffer.extend_from_slice(&(self.message.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(self.message.as_bytes());
+        buffer.extend_from_slice(&(self.details.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(self.details.as_bytes());
         buffer
     }
 }
@@ -347,8 +347,8 @@ impl Message for Hello {
 
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
-        buffer.extend_from_slice(&(self.payload.as_bytes().len() as u32).to_le_bytes());
-        buffer.extend_from_slice(&self.payload.as_bytes());
+        buffer.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(self.payload.as_bytes());
         buffer
     }
 }
