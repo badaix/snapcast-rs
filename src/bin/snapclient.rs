@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let (tx, rx) = mpsc::channel::<messages::WireChunk>(256);
     let mut player = player::Player::new();
-    player.play(rx);
+    player.play(player::Stream::new(rx));
     info!("Connecting to {}!", args.host);
     connect(&args.host, tx).await?;
     Ok(())
