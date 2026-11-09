@@ -1,11 +1,15 @@
 //! Audio player based on cpal
 
+use tokio::sync::mpsc;
+
 use cpal::{
     Device, Error, ErrorKind, FromSample, I24, OutputCallbackInfo, Sample, SampleFormat,
     SizedSample, StreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use log::debug;
+
+use crate::messages;
 
 pub struct Player {
     stream: Option<cpal::Stream>,
@@ -16,7 +20,7 @@ impl Player {
         Player { stream: None }
     }
 
-    pub fn play(&mut self) {
+    pub fn play(&mut self, channel: mpsc::Receiver<messages::WireChunk>) {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -26,26 +30,31 @@ impl Player {
         println!("Default output config: {config:?}");
 
         match config.sample_format() {
-            SampleFormat::I8 => self.run::<i8>(&device, config.into()),
-            SampleFormat::I16 => self.run::<i16>(&device, config.into()),
-            SampleFormat::I24 => self.run::<I24>(&device, config.into()),
-            SampleFormat::I32 => self.run::<i32>(&device, config.into()),
+            SampleFormat::I8 => self.run::<i8>(&device, config.into(), channel),
+            SampleFormat::I16 => self.run::<i16>(&device, config.into(), channel),
+            SampleFormat::I24 => self.run::<I24>(&device, config.into(), channel),
+            SampleFormat::I32 => self.run::<i32>(&device, config.into(), channel),
             // SampleFormat::I48 => self.run::<I48>(&device, config.into()),
-            SampleFormat::I64 => self.run::<i64>(&device, config.into()),
-            SampleFormat::U8 => self.run::<u8>(&device, config.into()),
-            SampleFormat::U16 => self.run::<u16>(&device, config.into()),
+            SampleFormat::I64 => self.run::<i64>(&device, config.into(), channel),
+            SampleFormat::U8 => self.run::<u8>(&device, config.into(), channel),
+            SampleFormat::U16 => self.run::<u16>(&device, config.into(), channel),
             // SampleFormat::U24 => self.run::<U24>(&device, config.into()),
-            SampleFormat::U32 => self.run::<u32>(&device, config.into()),
+            SampleFormat::U32 => self.run::<u32>(&device, config.into(), channel),
             // SampleFormat::U48 => self.run::<U48>(&device, config.into()),
-            SampleFormat::U64 => self.run::<u64>(&device, config.into()),
-            SampleFormat::F32 => self.run::<f32>(&device, config.into()),
-            SampleFormat::F64 => self.run::<f64>(&device, config.into()),
+            SampleFormat::U64 => self.run::<u64>(&device, config.into(), channel),
+            SampleFormat::F32 => self.run::<f32>(&device, config.into(), channel),
+            SampleFormat::F64 => self.run::<f64>(&device, config.into(), channel),
             sample_format => panic!("Unsupported sample format '{sample_format}'"),
         }
         .unwrap();
     }
 
-    pub fn run<T>(&mut self, device: &Device, config: StreamConfig) -> Result<(), anyhow::Error>
+    pub fn run<T>(
+        &mut self,
+        device: &Device,
+        config: StreamConfig,
+        mut channel: mpsc::Receiver<messages::WireChunk>,
+    ) -> Result<(), anyhow::Error>
     where
         T: SizedSample + FromSample<f32>,
     {
@@ -72,6 +81,11 @@ impl Player {
                 // if info.xrun() {
                 //     eprintln!("output underrun");
                 // }
+                debug!("Callback");
+                while let Ok(chunk) = channel.try_recv() {
+                    debug!("Received chunk: {}", chunk.payload.len());
+                }
+
                 write_data(data, channels, &mut next_value)
             },
             err_fn,
@@ -88,16 +102,6 @@ impl Default for Player {
     }
 }
 
-// fn write_silence<T>(data: &mut [T], _: &cpal::OutputCallbackInfo)
-// where
-//     T: Sample + FromSample<f32>,
-// {
-//     debug!("write silence");
-//     for sample in data.iter_mut() {
-//         *sample = T::from_sample(rand::random_range(-10000..10000) as f32 / 100.0); // Sample::EQUILIBRIUM;
-//     }
-// }
-
 fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
 where
     T: Sample + FromSample<f32>,
@@ -110,3 +114,13 @@ where
         }
     }
 }
+
+// fn write_silence<T>(data: &mut [T], _: &cpal::OutputCallbackInfo)
+// where
+//     T: Sample + FromSample<f32>,
+// {
+//     debug!("write silence");
+//     for sample in data.iter_mut() {
+//         *sample = T::from_sample(rand::random_range(-10000..10000) as f32 / 100.0); // Sample::EQUILIBRIUM;
+//     }
+// }

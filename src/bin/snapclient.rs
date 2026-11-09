@@ -6,6 +6,7 @@ use clap::Parser;
 use log::{debug, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 
 use snapcast::messages::{self, Message};
 use snapcast::player;
@@ -22,16 +23,19 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
-
+    let (tx, rx) = mpsc::channel::<messages::WireChunk>(256);
     let mut player = player::Player::new();
-    player.play();
+    player.play(rx);
     info!("Connecting to {}!", args.host);
-    connect(&args.host).await?;
+    connect(&args.host, tx).await?;
     Ok(())
 }
 
 /// Connects to the Snapcast server at the given host and port, sends a Hello message, and listens for incoming messages.
-pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn connect(
+    host: &str,
+    channel: mpsc::Sender<messages::WireChunk>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = TcpStream::connect(host).await?;
 
     let hello = messages::Hello::new(
@@ -63,6 +67,7 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 debug!("Received WireChunk message: {:?}", wire_chunk.base);
+                channel.send(wire_chunk).await?;
             }
             messages::MessageType::ServerSettings => {
                 let server_settings = messages::ServerSettings::deserialize(base_message, &buffer);
