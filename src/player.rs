@@ -1,5 +1,7 @@
 //! Audio player based on cpal
 
+use std::collections::VecDeque;
+
 use tokio::sync::mpsc;
 
 use cpal::{
@@ -13,26 +15,26 @@ use crate::messages;
 
 pub struct Stream {
     rx: mpsc::Receiver<messages::WireChunk>,
-    data: Vec<i16>,
+    data: VecDeque<i16>,
 }
 
 impl Stream {
     pub fn new(rx: mpsc::Receiver<messages::WireChunk>) -> Self {
         Stream {
             rx,
-            data: Vec::new(),
+            data: VecDeque::new(),
         }
     }
 
     pub fn fetch_data(&mut self) {
         while let Ok(chunk) = self.rx.try_recv() {
-            debug!("Received chunk: {}", chunk.payload.len());
+            // debug!("Received chunk: {}", chunk.payload.len());
             for n in 0..chunk.payload.len() / 2 {
-                self.data.push(
+                self.data.push_back(
                     (chunk.payload[2 * n + 1] as i16) * 256_i16 + chunk.payload[2 * n] as i16,
                 );
             }
-            debug!("data: {}", self.data.len());
+            // debug!("data: {}", self.data.len());
         }
     }
 }
@@ -53,7 +55,7 @@ impl Player {
             .expect("no output device available");
 
         let config = device.default_output_config().unwrap();
-        println!("Default output config: {config:?}");
+        debug!("Default output config: {config:?}");
         match config.sample_format() {
             SampleFormat::I8 => self.run::<i8>(&device, config.into(), stream),
             SampleFormat::I16 => self.run::<i16>(&device, config.into(), stream),
@@ -99,18 +101,13 @@ impl Player {
                 // if info.xrun() {
                 //     eprintln!("output underrun");
                 // }
-                debug!("Callback");
+                // debug!("Callback");
                 stream.fetch_data();
                 for frame in data.chunks_mut(channels) {
                     for sample in frame.iter_mut() {
-                        let value: T = T::from_sample(if stream.data.is_empty() {
-                            0.0
-                        } else {
-                            stream.data[0] as f32 / 32768.
-                        });
-
+                        let value: T =
+                            T::from_sample(stream.data.pop_front().unwrap_or(0) as f32 / 32768.);
                         *sample = value;
-                        stream.data.remove(0);
                     }
                 }
 
