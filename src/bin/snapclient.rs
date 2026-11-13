@@ -3,11 +3,12 @@
 use std::error::Error;
 
 use clap::Parser;
-use log::{debug, info};
+use log::{debug, error, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
+use snapcast::codec::{Codec, PcmChunk, Wav};
 use snapcast::messages::{self, Message};
 use snapcast::player;
 
@@ -23,7 +24,7 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
-    let (tx, rx) = mpsc::channel::<messages::WireChunk>(256);
+    let (tx, rx) = mpsc::channel::<PcmChunk>(256);
     let mut player = player::Player::new();
     player.play(player::Stream::new(rx));
     info!("Connecting to {}!", args.host);
@@ -34,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// Connects to the Snapcast server at the given host and port, sends a Hello message, and listens for incoming messages.
 pub async fn connect(
     host: &str,
-    channel: mpsc::Sender<messages::WireChunk>,
+    channel: mpsc::Sender<PcmChunk>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = TcpStream::connect(host).await?;
 
@@ -51,6 +52,7 @@ pub async fn connect(
     // Read incoming messages in a loop
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
+    let mut codec: Option<Wav> = None;
     loop {
         // Read the base message first
         stream.read_exact(&mut base_buffer).await?;
@@ -63,11 +65,21 @@ pub async fn connect(
             messages::MessageType::CodecHeader => {
                 let codec_header = messages::CodecHeader::deserialize(base_message, &buffer);
                 debug!("Received CodecHeader message: {:?}", codec_header);
+                match codec_header.codec.as_str() {
+                    "pcm" => {
+                        debug!("PCM");
+                        codec = Wav::from_header(codec_header);
+                        debug!("Sample format: {:?}", codec);
+                    }
+                    "flac" => debug!("FLAC"),
+                    _ => error!("Unknown codec: {}", codec_header.codec),
+                }
             }
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 debug!("Received WireChunk message: {:?}", wire_chunk.base);
-                channel.send(wire_chunk).await?;
+                let pcm_chunk = codec.as_ref().unwrap().decode(wire_chunk);
+                channel.send(pcm_chunk).await?;
             }
             messages::MessageType::ServerSettings => {
                 let server_settings = messages::ServerSettings::deserialize(base_message, &buffer);

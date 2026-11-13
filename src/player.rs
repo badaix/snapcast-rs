@@ -2,24 +2,23 @@
 
 use std::collections::VecDeque;
 
-use tokio::sync::mpsc;
-
 use cpal::{
     Device, Error, ErrorKind, FromSample, I24, OutputCallbackInfo, SampleFormat, SizedSample,
     StreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use log::debug;
+use tokio::sync::mpsc;
 
-use crate::messages;
+use crate::codec;
 
 pub struct Stream {
-    rx: mpsc::Receiver<messages::WireChunk>,
+    rx: mpsc::Receiver<codec::PcmChunk>,
     data: VecDeque<i16>,
 }
 
 impl Stream {
-    pub fn new(rx: mpsc::Receiver<messages::WireChunk>) -> Self {
+    pub fn new(rx: mpsc::Receiver<codec::PcmChunk>) -> Self {
         Stream {
             rx,
             data: VecDeque::new(),
@@ -30,9 +29,9 @@ impl Stream {
         while let Ok(chunk) = self.rx.try_recv() {
             // debug!("Received chunk: {}", chunk.payload.len());
             for n in 0..chunk.payload.len() / 2 {
-                self.data.push_back(
-                    (chunk.payload[2 * n + 1] as i16) * 256_i16 + chunk.payload[2 * n] as i16,
-                );
+                self.data.push_back(i16::from_le_bytes(
+                    chunk.payload[2 * n..2 * n + 2].try_into().unwrap(),
+                ));
             }
             // debug!("data: {}", self.data.len());
         }

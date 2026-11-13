@@ -18,6 +18,13 @@ pub enum MessageType {
 }
 
 #[derive(Debug)]
+pub struct SampleFormat {
+    pub rate: u32,
+    pub bits: u16,
+    pub channels: u16,
+}
+
+#[derive(Debug)]
 pub struct TimeStamp {
     sec: i32,
     usec: i32,
