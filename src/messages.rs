@@ -3,6 +3,7 @@
 //! `snapcast protocol` implementation of the streaming protocol as defined here:
 //! https://github.com/snapcast/snapcast/blob/develop/doc/binary_protocol.md
 
+use crate::types::TimeStamp;
 use std::ops;
 
 #[derive(Debug, Clone, Copy)]
@@ -15,19 +16,6 @@ pub enum MessageType {
     Hello = 5,
     ClientInfo = 7,
     Error = 8,
-}
-
-#[derive(Debug)]
-pub struct SampleFormat {
-    pub rate: u32,
-    pub bits: u16,
-    pub channels: u16,
-}
-
-#[derive(Debug)]
-pub struct TimeStamp {
-    sec: i32,
-    usec: i32,
 }
 
 #[derive(Debug)]

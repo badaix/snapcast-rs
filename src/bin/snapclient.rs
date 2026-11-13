@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use snapcast::codec::{Codec, PcmChunk, Wav};
 use snapcast::messages::{self, Message};
 use snapcast::player;
+use snapcast::types;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -24,9 +25,16 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
+
     let (tx, rx) = mpsc::channel::<PcmChunk>(256);
     let mut player = player::Player::new();
-    player.play(player::Stream::new(rx));
+    let sf = types::SampleFormat {
+        rate: 48000,
+        bits: 16,
+        channels: 2,
+    };
+    player.play(player::AudioStream::new(rx, sf));
+
     info!("Connecting to {}!", args.host);
     connect(&args.host, tx).await?;
     Ok(())
@@ -53,6 +61,8 @@ pub async fn connect(
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
     let mut codec: Option<Wav> = None;
+    // let mut player = player::Player::new();
+    // let (tx, rx) = mpsc::channel::<PcmChunk>(256);
     loop {
         // Read the base message first
         stream.read_exact(&mut base_buffer).await?;
@@ -70,6 +80,9 @@ pub async fn connect(
                         debug!("PCM");
                         codec = Wav::from_header(codec_header);
                         debug!("Sample format: {:?}", codec);
+                        // let audiostream =
+                        //     player::AudioStream::new(rx, codec.unwrap().sample_format);
+                        // player.play(audiostream);
                     }
                     "flac" => debug!("FLAC"),
                     _ => error!("Unknown codec: {}", codec_header.codec),
@@ -78,8 +91,10 @@ pub async fn connect(
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 debug!("Received WireChunk message: {:?}", wire_chunk.base);
-                let pcm_chunk = codec.as_ref().unwrap().decode(wire_chunk);
-                channel.send(pcm_chunk).await?;
+                if let Some(c) = codec.as_ref() {
+                    let pcm_chunk = c.decode(wire_chunk);
+                    channel.send(pcm_chunk).await?;
+                }
             }
             messages::MessageType::ServerSettings => {
                 let server_settings = messages::ServerSettings::deserialize(base_message, &buffer);

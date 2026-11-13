@@ -1,6 +1,7 @@
 //! # Snapcast codec
 
-use crate::messages::{CodecHeader, SampleFormat, TimeStamp, WireChunk};
+use crate::messages::{CodecHeader, WireChunk};
+use crate::types::{SampleFormat, TimeStamp};
 
 #[derive(Debug)]
 pub struct PcmChunk {
