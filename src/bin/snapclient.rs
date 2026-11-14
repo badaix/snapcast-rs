@@ -1,16 +1,16 @@
 //! Snapcast client implementation
 
 use std::error::Error;
+use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 use log::{debug, error, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
 
-use snapcast::codec::{Codec, PcmChunk, Wav};
+use snapcast::codec::{Codec, Wav};
 use snapcast::messages::{self, Message};
-use snapcast::player;
+use snapcast::player::{self, AudioStream};
 use snapcast::types;
 
 #[derive(Parser, Debug)]
@@ -26,24 +26,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
 
-    let (tx, rx) = mpsc::channel::<PcmChunk>(256);
+    // let (tx, rx) = mpsc::channel::<PcmChunk>(256);
     let mut player = player::Player::new();
     let sf = types::SampleFormat {
         rate: 48000,
         bits: 16,
         channels: 2,
     };
-    player.play(player::AudioStream::new(rx, sf));
+    let audiostream = Arc::new(Mutex::new(player::AudioStream::new(sf)));
+    player.play(Arc::clone(&audiostream));
 
     info!("Connecting to {}!", args.host);
-    connect(&args.host, tx).await?;
+    connect(&args.host, Arc::clone(&audiostream)).await?;
     Ok(())
 }
 
 /// Connects to the Snapcast server at the given host and port, sends a Hello message, and listens for incoming messages.
 pub async fn connect(
     host: &str,
-    channel: mpsc::Sender<PcmChunk>,
+    audiostream: Arc<Mutex<AudioStream>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = TcpStream::connect(host).await?;
 
@@ -93,7 +94,9 @@ pub async fn connect(
                 debug!("Received WireChunk message: {:?}", wire_chunk.base);
                 if let Some(c) = codec.as_ref() {
                     let pcm_chunk = c.decode(wire_chunk);
-                    channel.send(pcm_chunk).await?;
+                    let mut audiostream = audiostream.lock().unwrap();
+                    audiostream.add(pcm_chunk);
+                    // channel.send(pcm_chunk).await?;
                 }
             }
             messages::MessageType::ServerSettings => {

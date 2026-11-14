@@ -7,36 +7,42 @@ use cpal::{
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use tokio::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
-use crate::codec;
+use crate::codec::PcmChunk;
 use crate::types::SampleFormat;
 
 pub struct AudioStream {
-    rx: mpsc::Receiver<codec::PcmChunk>,
     sampleformat: SampleFormat,
     data: VecDeque<i16>,
 }
 
 impl AudioStream {
-    pub fn new(rx: mpsc::Receiver<codec::PcmChunk>, sampleformat: SampleFormat) -> Self {
+    pub fn new(sampleformat: SampleFormat) -> Self {
         AudioStream {
-            rx,
             sampleformat,
             data: VecDeque::new(),
         }
     }
 
-    pub fn fetch_data(&mut self) {
-        while let Ok(chunk) = self.rx.try_recv() {
-            // debug!("Received chunk: {}", chunk.payload.len());
-            for n in 0..chunk.payload.len() / 2 {
-                self.data.push_back(i16::from_le_bytes(
-                    chunk.payload[2 * n..2 * n + 2].try_into().unwrap(),
-                ));
-            }
-            // debug!("data: {}", self.data.len());
+    pub fn add(&mut self, chunk: PcmChunk) {
+        for n in 0..chunk.payload.len() / 2 {
+            self.data.push_back(i16::from_le_bytes(
+                chunk.payload[2 * n..2 * n + 2].try_into().unwrap(),
+            ));
         }
+    }
+
+    pub fn fetch_data(&mut self) {
+        // while let Ok(chunk) = self.rx.try_recv() {
+        //     // debug!("Received chunk: {}", chunk.payload.len());
+        //     for n in 0..chunk.payload.len() / 2 {
+        //         self.data.push_back(i16::from_le_bytes(
+        //             chunk.payload[2 * n..2 * n + 2].try_into().unwrap(),
+        //         ));
+        //     }
+        //     // debug!("data: {}", self.data.len());
+        // }
     }
 }
 
@@ -49,18 +55,27 @@ impl Player {
         Player { stream: None }
     }
 
-    pub fn play(&mut self, audiostream: AudioStream) {
+    pub fn play(&mut self, audiostream: Arc<Mutex<AudioStream>>) {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
             .expect("no output device available");
 
+        let channels: u16;
+        let rate: u32;
+        {
+            let stream = audiostream.lock().unwrap();
+            channels = stream.sampleformat.channels;
+            rate = stream.sampleformat.rate;
+        }
+
         let config = SupportedStreamConfig::new(
-            audiostream.sampleformat.channels,
-            audiostream.sampleformat.rate,
+            channels,
+            rate,
             *device.default_output_config().unwrap().buffer_size(),
             cpal::SampleFormat::I16,
         );
+
         self.run::<i16>(&device, config.into(), audiostream)
             .unwrap();
 
@@ -91,7 +106,7 @@ impl Player {
         &mut self,
         device: &Device,
         config: StreamConfig,
-        mut audiostream: AudioStream,
+        audiostream: Arc<Mutex<AudioStream>>,
     ) -> Result<(), anyhow::Error>
     where
         T: SizedSample + FromSample<f32>,
@@ -113,7 +128,8 @@ impl Player {
                 //     eprintln!("output underrun");
                 // }
                 // debug!("Callback");
-                audiostream.fetch_data();
+                let mut audiostream = audiostream.lock().unwrap();
+                // audiostream.fetch_data();
                 for frame in data.chunks_mut(channels) {
                     for sample in frame.iter_mut() {
                         let value: T = T::from_sample(
