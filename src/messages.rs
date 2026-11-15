@@ -45,7 +45,13 @@ pub struct WireChunk {
 #[derive(Debug)]
 pub struct ServerSettings {
     pub base: BaseMessage,
-    pub payload: Vec<u8>,
+    pub payload: String,
+    // {
+    //     "bufferMs": 1000,
+    //     "latency": 0,
+    //     "muted": false,
+    //     "volume": 100
+    // }
 }
 
 #[derive(Debug)]
@@ -58,12 +64,31 @@ pub struct Time {
 pub struct Hello {
     pub base: BaseMessage,
     pub payload: String,
+    // {
+    //     "Arch": "x86_64",
+    //     "Auth": {
+    //         "param": "YmFkYWl4OnBhc3N3ZA==",
+    //         "scheme": "Basic"
+    //     },
+    //     "ClientName": "Snapclient",
+    //     "HostName": "my_hostname",
+    //     "ID": "00:11:22:33:44:55",
+    //     "Instance": 1,
+    //     "MAC": "00:11:22:33:44:55",
+    //     "OS": "Arch Linux",
+    //     "SnapStreamProtocolVersion": 2,
+    //     "Version": "0.32.0"
+    // }
 }
 
 #[derive(Debug)]
 pub struct ClientInfo {
     pub base: BaseMessage,
     pub payload: String,
+    // {
+    //     "volume": 100,
+    //     "muted": false,
+    // }
 }
 
 #[derive(Debug)]
@@ -229,7 +254,7 @@ impl Message for WireChunk {
 impl Message for ServerSettings {
     fn deserialize(basemessage: BaseMessage, buffer: &[u8]) -> Self {
         let payload_size = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
-        let payload = buffer[4..(4 + payload_size as usize)].to_vec();
+        let payload = String::from_utf8_lossy(&buffer[4..(4 + payload_size as usize)]).into_owned();
         ServerSettings {
             base: basemessage,
             payload,
@@ -239,7 +264,7 @@ impl Message for ServerSettings {
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         buffer.extend_from_slice(&self.payload.len().to_le_bytes());
-        buffer.extend_from_slice(&self.payload);
+        buffer.extend_from_slice(self.payload.as_bytes());
         buffer
     }
 }

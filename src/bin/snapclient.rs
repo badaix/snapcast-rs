@@ -26,7 +26,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
 
-    // let (tx, rx) = mpsc::channel::<PcmChunk>(256);
     let mut player = player::Player::new();
     let sf = types::SampleFormat {
         rate: 48000,
@@ -92,11 +91,11 @@ pub async fn connect(
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 debug!("Received WireChunk message: {:?}", wire_chunk.base);
-                if let Some(c) = codec.as_ref() {
-                    let pcm_chunk = c.decode(wire_chunk);
+                if let Some(c) = codec.as_ref()
+                    && let Some(pcm_chunk) = c.decode(wire_chunk)
+                {
                     let mut audiostream = audiostream.lock().unwrap();
                     audiostream.add(pcm_chunk);
-                    // channel.send(pcm_chunk).await?;
                 }
             }
             messages::MessageType::ServerSettings => {

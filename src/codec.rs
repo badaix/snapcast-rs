@@ -16,15 +16,15 @@ pub struct Wav {
 
 pub trait Codec {
     // fn from_header(header: CodecHeader) -> Option<Self> where Self: Sized;
-    fn decode(&self, data: WireChunk) -> PcmChunk;
+    fn decode(&self, data: WireChunk) -> Option<PcmChunk>;
 }
 
 impl Codec for Wav {
-    fn decode(&self, data: WireChunk) -> PcmChunk {
-        PcmChunk {
+    fn decode(&self, data: WireChunk) -> Option<PcmChunk> {
+        Some(PcmChunk {
             timestamp: data.timestamp,
             payload: data.payload,
-        }
+        })
     }
 }
 
