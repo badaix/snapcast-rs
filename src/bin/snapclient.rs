@@ -1,6 +1,7 @@
 //! Snapcast client implementation
 
 use std::error::Error;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
@@ -111,6 +112,7 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
             messages::MessageType::ServerSettings => {
                 let server_settings = messages::ServerSettings::deserialize(base_message, &buffer);
                 debug!("Received ServerSettings message: {:?}", server_settings);
+                player.volume.store(server_settings.volume, Relaxed);
             }
             messages::MessageType::Time => {
                 let time_message = messages::Time::deserialize(base_message, &buffer);

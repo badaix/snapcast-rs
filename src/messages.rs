@@ -4,6 +4,7 @@
 //! https://github.com/snapcast/snapcast/blob/develop/doc/binary_protocol.md
 
 use crate::types::TimeStamp;
+use serde_json;
 use std::ops;
 
 #[derive(Debug, Clone, Copy)]
@@ -45,7 +46,11 @@ pub struct WireChunk {
 #[derive(Debug)]
 pub struct ServerSettings {
     pub base: BaseMessage,
-    pub payload: String,
+    // pub payload: String,
+    pub buffer_ms: u16,
+    pub latency: i16,
+    pub muted: bool,
+    pub volume: u16,
     // {
     //     "bufferMs": 1000,
     //     "latency": 0,
@@ -84,11 +89,8 @@ pub struct Hello {
 #[derive(Debug)]
 pub struct ClientInfo {
     pub base: BaseMessage,
-    pub payload: String,
-    // {
-    //     "volume": 100,
-    //     "muted": false,
-    // }
+    pub volume: u16,
+    pub muted: bool,
 }
 
 #[derive(Debug)]
@@ -254,17 +256,23 @@ impl Message for WireChunk {
 impl Message for ServerSettings {
     fn deserialize(basemessage: BaseMessage, buffer: &[u8]) -> Self {
         let payload_size = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
-        let payload = String::from_utf8_lossy(&buffer[4..(4 + payload_size as usize)]).into_owned();
+        let json: serde_json::Value =
+            serde_json::from_slice(&buffer[4..(4 + payload_size as usize)]).unwrap();
         ServerSettings {
             base: basemessage,
-            payload,
+            buffer_ms: json["bufferMs"].as_i64().unwrap() as u16,
+            latency: json["latency"].as_i64().unwrap() as i16,
+            muted: json["muted"].as_bool().unwrap(),
+            volume: json["volume"].as_i64().unwrap() as u16,
         }
     }
 
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
-        buffer.extend_from_slice(&self.payload.len().to_le_bytes());
-        buffer.extend_from_slice(self.payload.as_bytes());
+        let json = serde_json::json!({"bufferMs": &self.buffer_ms, "latency": &self.latency, "muted": self.muted, "volume": &self.volume});
+        let json_str = json.to_string();
+        buffer.extend_from_slice(&(json_str.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(json_str.as_bytes());
         buffer
     }
 }
@@ -306,17 +314,21 @@ impl Hello {
 impl Message for ClientInfo {
     fn deserialize(basemessage: BaseMessage, buffer: &[u8]) -> Self {
         let payload_size = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
-        let payload = String::from_utf8_lossy(&buffer[4..(4 + payload_size as usize)]).into_owned();
+        let json: serde_json::Value =
+            serde_json::from_slice(&buffer[4..(4 + payload_size as usize)]).unwrap();
         ClientInfo {
             base: basemessage,
-            payload,
+            volume: json["volume"].as_i64().unwrap() as u16,
+            muted: json["muted"].as_bool().unwrap(),
         }
     }
 
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
-        buffer.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
-        buffer.extend_from_slice(self.payload.as_bytes());
+        let json = serde_json::json!({"volume": self.volume, "muted": self.muted});
+        let json_str = json.to_string();
+        buffer.extend_from_slice(&(json_str.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(json_str.as_bytes());
         buffer
     }
 }

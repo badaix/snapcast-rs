@@ -1,6 +1,9 @@
 //! Audio player based on cpal
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    sync::atomic::{AtomicU16, Ordering::Relaxed},
+};
 
 use cpal::{
     Device, Error, ErrorKind, FromSample, OutputCallbackInfo, SizedSample, StreamConfig,
@@ -48,11 +51,15 @@ impl AudioStream {
 
 pub struct Player {
     stream: Option<cpal::Stream>,
+    pub volume: Arc<AtomicU16>,
 }
 
 impl Player {
     pub fn new() -> Self {
-        Player { stream: None }
+        Player {
+            stream: None,
+            volume: Arc::new(AtomicU16::new(100)),
+        }
     }
 
     pub fn play(&mut self, audiostream: Arc<Mutex<AudioStream>>) {
@@ -76,30 +83,13 @@ impl Player {
             cpal::SampleFormat::I16,
         );
 
-        self.run::<i16>(&device, config.into(), audiostream)
-            .unwrap();
-
-        // // config.
-        // let config = device.default_output_config().unwrap();
-        // debug!("Default output config: {config:?}");
-        // match config.sample_format() {
-        //     SampleFormat::I8 => self.run::<i8>(&device, config.into(), stream),
-        //     SampleFormat::I16 => self.run::<i16>(&device, config.into(), stream),
-        //     SampleFormat::I24 => self.run::<I24>(&device, config.into(), stream),
-        //     SampleFormat::I32 => self.run::<i32>(&device, config.into(), stream),
-        //     // SampleFormat::I48 => self.run::<I48>(&device, config.into()),
-        //     SampleFormat::I64 => self.run::<i64>(&device, config.into(), stream),
-        //     SampleFormat::U8 => self.run::<u8>(&device, config.into(), stream),
-        //     SampleFormat::U16 => self.run::<u16>(&device, config.into(), stream),
-        //     // SampleFormat::U24 => self.run::<U24>(&device, config.into()),
-        //     SampleFormat::U32 => self.run::<u32>(&device, config.into(), stream),
-        //     // SampleFormat::U48 => self.run::<U48>(&device, config.into()),
-        //     SampleFormat::U64 => self.run::<u64>(&device, config.into(), stream),
-        //     SampleFormat::F32 => self.run::<f32>(&device, config.into(), stream),
-        //     SampleFormat::F64 => self.run::<f64>(&device, config.into(), stream),
-        //     sample_format => panic!("Unsupported sample format '{sample_format}'"),
-        // }
-        // .unwrap();
+        self.run::<i16>(
+            &device,
+            config.into(),
+            audiostream,
+            Arc::clone(&self.volume),
+        )
+        .unwrap();
     }
 
     pub fn run<T>(
@@ -107,6 +97,7 @@ impl Player {
         device: &Device,
         config: StreamConfig,
         audiostream: Arc<Mutex<AudioStream>>,
+        volume: Arc<AtomicU16>,
     ) -> Result<(), anyhow::Error>
     where
         T: SizedSample + FromSample<f32>,
@@ -127,19 +118,17 @@ impl Player {
                 // if info.xrun() {
                 //     eprintln!("output underrun");
                 // }
-                // debug!("Callback");
+                let vol: f32 = volume.load(Relaxed) as f32 / 100.;
+                // debug!("Callback, volume: {}", vol);
                 let mut audiostream = audiostream.lock().unwrap();
-                // audiostream.fetch_data();
                 for frame in data.chunks_mut(channels) {
                     for sample in frame.iter_mut() {
                         let value: T = T::from_sample(
-                            audiostream.data.pop_front().unwrap_or(0) as f32 / 32768.,
+                            audiostream.data.pop_front().unwrap_or(0) as f32 / 32768. * vol,
                         );
                         *sample = value;
                     }
                 }
-
-                // write_data(data, channels, &mut next_value)
             },
             err_fn,
             None,
