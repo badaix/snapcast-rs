@@ -8,7 +8,7 @@ use log::{debug, error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use snapcast::codec::{Codec, Flac, Wav};
+use snapcast::codec::{Codec, Flac, Null, Wav};
 use snapcast::messages::{self, Message};
 use snapcast::player;
 use snapcast::types;
@@ -54,11 +54,7 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Read incoming messages in a loop
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
-    let mut codec: Box<dyn Codec> = Box::new(Wav::new(types::SampleFormat {
-        rate: 48000,
-        bits: 16,
-        channels: 2,
-    }));
+    let mut codec: Box<dyn Codec> = Box::new(Null);
     // let mut player = player::Player::new();
     loop {
         // Read the base message first
@@ -82,7 +78,6 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
-                    "ogg" => warn!("ogg not implemented"),
                     "flac" => {
                         info!("flac codec");
                         codec = Box::new(Flac::from_header(codec_header).unwrap());
@@ -92,8 +87,16 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
+                    "null" => {
+                        info!("null codec");
+                        codec = Box::new(Null::new());
+                        audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                            codec.as_ref().get_sampleformat(),
+                        )));
+                        player.play(Arc::clone(&audiostream));
+                    }
+                    "ogg" => warn!("ogg not implemented"),
                     "opus" => warn!("opus not implemented"),
-                    "null" => warn!("null not implemented"),
                     _ => error!("Unknown codec: {}", codec_header.codec),
                 }
             }

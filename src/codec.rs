@@ -19,6 +19,9 @@ pub struct Wav {
     pub sample_format: SampleFormat,
 }
 
+#[derive(Debug)]
+pub struct Null;
+
 pub struct Flac {
     decoder: Box<dyn symphonia::core::codecs::Decoder>,
     pub sample_format: SampleFormat,
@@ -26,7 +29,6 @@ pub struct Flac {
 }
 
 pub trait Codec {
-    // fn from_header(header: CodecHeader) -> Option<Self> where Self: Sized;
     fn decode(&mut self, data: WireChunk) -> Option<PcmChunk>;
     fn get_sampleformat(&self) -> SampleFormat;
 }
@@ -96,6 +98,33 @@ impl Wav {
                 channels,
             },
         })
+    }
+}
+
+impl Null {
+    pub fn new() -> Null {
+        Null
+    }
+}
+
+impl Default for Null {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Codec for Null {
+    fn decode(&mut self, _data: WireChunk) -> Option<PcmChunk> {
+        None
+    }
+
+    // actually not really needed...
+    fn get_sampleformat(&self) -> SampleFormat {
+        SampleFormat {
+            rate: 48000,
+            bits: 16,
+            channels: 2,
+        }
     }
 }
 
