@@ -2,6 +2,11 @@
 
 use crate::messages::{CodecHeader, WireChunk};
 use crate::types::{SampleFormat, TimeStamp};
+use anyhow::{Result, bail};
+use log::{debug, warn};
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{CODEC_TYPE_FLAC, CodecParameters, DecoderOptions};
+use symphonia::core::formats::Packet;
 
 #[derive(Debug)]
 pub struct PcmChunk {
@@ -14,17 +19,28 @@ pub struct Wav {
     pub sample_format: SampleFormat,
 }
 
+pub struct Flac {
+    decoder: Box<dyn symphonia::core::codecs::Decoder>,
+    pub sample_format: SampleFormat,
+    packet_id: u64,
+}
+
 pub trait Codec {
     // fn from_header(header: CodecHeader) -> Option<Self> where Self: Sized;
-    fn decode(&self, data: WireChunk) -> Option<PcmChunk>;
+    fn decode(&mut self, data: WireChunk) -> Option<PcmChunk>;
+    fn get_sampleformat(&self) -> SampleFormat;
 }
 
 impl Codec for Wav {
-    fn decode(&self, data: WireChunk) -> Option<PcmChunk> {
+    fn decode(&mut self, data: WireChunk) -> Option<PcmChunk> {
         Some(PcmChunk {
             timestamp: data.timestamp,
             payload: data.payload,
         })
+    }
+
+    fn get_sampleformat(&self) -> SampleFormat {
+        self.sample_format
     }
 }
 
@@ -54,6 +70,111 @@ impl Wav {
                 bits,
                 channels,
             },
+        })
+    }
+}
+
+impl Codec for Flac {
+    fn decode(&mut self, data: WireChunk) -> Option<PcmChunk> {
+        if data.payload.is_empty() {
+            return None;
+        }
+
+        let packet = Packet::new_from_slice(0, self.packet_id, 0, &data.payload);
+        self.packet_id += 1;
+
+        let decoded = match self.decoder.decode(&packet) {
+            Ok(buf) => buf,
+            Err(e) => {
+                warn!("Failed to decode flac chunk, error: {}", e);
+                return None;
+            }
+        };
+
+        let spec = *decoded.spec();
+        let frames = decoded.frames() as u64;
+
+        let mut sample_buf = SampleBuffer::<i16>::new(frames, spec);
+        sample_buf.copy_interleaved_ref(decoded);
+        let samples = sample_buf.samples();
+
+        let mut out = Vec::with_capacity(samples.len() * 4);
+        for &s in samples {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+
+        Some(PcmChunk {
+            timestamp: data.timestamp,
+            payload: out,
+        })
+    }
+
+    fn get_sampleformat(&self) -> SampleFormat {
+        self.sample_format
+    }
+}
+
+/// Parse FLAC STREAMINFO from a codec header payload.
+///
+/// Layout: "fLaC" (4) + block_header (4) + STREAMINFO (34)
+/// STREAMINFO bytes 10-13 contain: sample_rate (20 bits) | channels-1 (3 bits) | bps-1 (5 bits)
+fn parse_streaminfo(payload: &[u8]) -> Result<(SampleFormat, CodecParameters)> {
+    if payload.len() < 42 {
+        bail!(
+            "FLAC header too small ({} bytes, need >= 42)",
+            payload.len()
+        );
+    }
+    if &payload[0..4] != b"fLaC" {
+        bail!("not a FLAC header (missing fLaC magic)");
+    }
+
+    // STREAMINFO starts at offset 8 (after 4-byte magic + 4-byte block header)
+    let si = &payload[8..];
+
+    // Bytes 10-13 of STREAMINFO (offsets 10..14 from si start):
+    // 20 bits sample rate | 3 bits (channels-1) | 5 bits (bps-1) | 36 bits total samples
+    let b10 = si[10] as u32;
+    let b11 = si[11] as u32;
+    let b12 = si[12] as u32;
+
+    let sample_rate = (b10 << 12) | (b11 << 4) | (b12 >> 4);
+    let channels = ((b12 >> 1) & 0x07) + 1;
+    let bits_per_sample = (((b12 & 0x01) << 4) | (si[13] as u32 >> 4)) + 1;
+
+    let sf = SampleFormat {
+        rate: sample_rate,
+        bits: bits_per_sample as u16,
+        channels: channels as u16,
+    };
+    debug!("Flac sample format: {:?}", sf);
+
+    let mut params = CodecParameters::new();
+    params
+        .for_codec(CODEC_TYPE_FLAC)
+        .with_sample_rate(sample_rate)
+        .with_bits_per_sample(bits_per_sample)
+        .with_channels(
+            symphonia::core::audio::Channels::from_bits(((1u64 << channels) - 1) as u32)
+                .unwrap_or(symphonia::core::audio::Channels::FRONT_LEFT),
+        )
+        .with_extra_data(payload[8..42].to_vec().into_boxed_slice());
+
+    Ok((sf, params))
+}
+
+impl Flac {
+    pub fn from_header(header: CodecHeader) -> Option<Flac> {
+        let (sf, params) = parse_streaminfo(&header.payload).unwrap();
+        let decoder = symphonia::default::get_codecs()
+            .make(&params, &DecoderOptions::default())
+            .map_err(|e| anyhow::anyhow!("failed to create FLAC decoder: {e}"))
+            .unwrap();
+
+        Some(Self {
+            decoder,
+            sample_format: sf,
+            packet_id: 0,
         })
     }
 }

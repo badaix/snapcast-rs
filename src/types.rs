@@ -1,6 +1,6 @@
 //! # Snapcast protocol types
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct SampleFormat {
     pub rate: u32,
     pub bits: u16,

@@ -4,13 +4,13 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use snapcast::codec::{Codec, Wav};
+use snapcast::codec::{Codec, Flac};
 use snapcast::messages::{self, Message};
-use snapcast::player::{self, AudioStream};
+use snapcast::player;
 use snapcast::types;
 
 #[derive(Parser, Debug)]
@@ -26,33 +26,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
 
-    let mut player = player::Player::new();
-    let sf = types::SampleFormat {
-        rate: 48000,
-        bits: 16,
-        channels: 2,
-    };
-    let audiostream = Arc::new(Mutex::new(player::AudioStream::new(sf)));
-    player.play(Arc::clone(&audiostream));
-
     info!("Connecting to {}!", args.host);
-    connect(&args.host, Arc::clone(&audiostream)).await?;
+    connect(&args.host).await?;
     Ok(())
 }
 
 /// Connects to the Snapcast server at the given host and port, sends a Hello message, and listens for incoming messages.
-pub async fn connect(
-    host: &str,
-    audiostream: Arc<Mutex<AudioStream>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = TcpStream::connect(host).await?;
+pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut audiostream = Arc::new(Mutex::new(player::AudioStream::new(types::SampleFormat {
+        rate: 4800,
+        bits: 16,
+        channels: 2,
+    })));
+    let mut player = player::Player::new();
 
+    let mac = mac_address::get_mac_address()?.unwrap().to_string();
+    let mut stream = TcpStream::connect(host).await?;
     let hello = messages::Hello::new(
         1,
         0,
-        r#"{"Arch": "x86_64", "Auth": {"param": "YmFkYWl4OnBhc3N3ZA==", "scheme": "Basic"}, "ClientName": "Snapclient-rust", "HostName": "my_hostname", "ID": "00:11:22:33:44:55", "Instance": 1, "MAC": "00:11:22:33:44:55", "OS": "Arch Linux", "SnapStreamProtocolVersion": 2, "Version": "0.32.0"}"#,
+        serde_json::json!({"Arch": "x86_64", "Auth": {"param": "YmFkYWl4OnBhc3N3ZA==", "scheme": "Basic"}, "ClientName": "Snapclient-rust", "HostName": hostname::get().unwrap().to_str(), "ID": mac, "Instance": 1, "MAC": mac, "OS": "Arch Linux", "SnapStreamProtocolVersion": 2, "Version": "0.32.0"}).to_string().as_str(),
     );
-
     debug!("Sending Hello message: {:?}", hello);
     let msg: Vec<u8> = hello.serialize();
     stream.write_all(&msg).await?;
@@ -60,9 +54,8 @@ pub async fn connect(
     // Read incoming messages in a loop
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
-    let mut codec: Option<Wav> = None;
+    let mut codec: Option<Flac> = None;
     // let mut player = player::Player::new();
-    // let (tx, rx) = mpsc::channel::<PcmChunk>(256);
     loop {
         // Read the base message first
         stream.read_exact(&mut base_buffer).await?;
@@ -77,21 +70,40 @@ pub async fn connect(
                 debug!("Received CodecHeader message: {:?}", codec_header);
                 match codec_header.codec.as_str() {
                     "pcm" => {
-                        debug!("PCM");
-                        codec = Wav::from_header(codec_header);
-                        debug!("Sample format: {:?}", codec);
+                        info!("pcm codec");
+                        // codec = Wav::from_header(codec_header);
+                        // info!("Sample format: {:?}", codec);
+                        // audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                        //     codec.as_ref().unwrap().sample_format,
+                        // )));
+                        // player.play(Arc::clone(&audiostream));
+
                         // let audiostream =
                         //     player::AudioStream::new(rx, codec.unwrap().sample_format);
                         // player.play(audiostream);
                     }
-                    "flac" => debug!("FLAC"),
+                    "ogg" => warn!("ogg not implemented"),
+                    "flac" => {
+                        info!("flac codec");
+                        codec = Flac::from_header(codec_header);
+                        // info!("Sample format: {:?}", codec);
+                        audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                            codec.as_ref().unwrap().sample_format,
+                        )));
+                        player.play(Arc::clone(&audiostream));
+                        // let audiostream =
+                        //     player::AudioStream::new(rx, codec.unwrap().sample_format);
+                        // player.play(audiostream);
+                    }
+                    "opus" => warn!("opus not implemented"),
+                    "null" => warn!("null not implemented"),
                     _ => error!("Unknown codec: {}", codec_header.codec),
                 }
             }
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
-                debug!("Received WireChunk message: {:?}", wire_chunk.base);
-                if let Some(c) = codec.as_ref()
+                // debug!("Received WireChunk message: {:?}", wire_chunk.base);
+                if let Some(ref mut c) = codec
                     && let Some(pcm_chunk) = c.decode(wire_chunk)
                 {
                     let mut audiostream = audiostream.lock().unwrap();
