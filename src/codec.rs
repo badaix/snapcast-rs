@@ -45,6 +45,10 @@ impl Codec for Wav {
 }
 
 impl Wav {
+    pub fn new(sf: SampleFormat) -> Wav {
+        Wav { sample_format: sf }
+    }
+
     pub fn from_header(header: CodecHeader) -> Option<Wav> {
         // https://en.wikipedia.org/wiki/WAV
         // [Master RIFF chunk]
@@ -61,6 +65,27 @@ impl Wav {
         //     BytePerSec      (4 bytes) : Number of bytes to read per second (Frequency * BytePerBloc).
         //     BytePerBloc     (2 bytes) : Number of bytes per block (NbrChannels * BitsPerSample / 8).
         //     BitsPerSample   (2 bytes) : Number of bits per sample
+        if header.payload.len() < 36 {
+            panic!(
+                "WAV header too small ({} bytes, need >= 36)",
+                header.payload.len()
+            );
+        }
+
+        if &header.payload[0..4] != b"RIFF" {
+            panic!("Not a WAV header (missing 'RIFF' identifier)");
+        }
+        if &header.payload[8..12] != b"WAVE" {
+            panic!("Not a WAV header (missing 'WAVE' format)");
+        }
+        if &header.payload[12..16] != b"fmt " {
+            panic!("WAVE audio format must be PCM (=1)");
+        }
+        let audio_format = u16::from_le_bytes(header.payload[20..22].try_into().unwrap());
+        if audio_format != 1 {
+            panic!("Not a WAV header (missing 'fmt ' identifier)");
+        }
+
         let rate = u32::from_le_bytes(header.payload[24..28].try_into().unwrap());
         let bits = u16::from_le_bytes(header.payload[34..36].try_into().unwrap());
         let channels = u16::from_le_bytes(header.payload[22..24].try_into().unwrap());

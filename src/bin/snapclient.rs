@@ -8,7 +8,7 @@ use log::{debug, error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use snapcast::codec::{Codec, Flac};
+use snapcast::codec::{Codec, Flac, Wav};
 use snapcast::messages::{self, Message};
 use snapcast::player;
 use snapcast::types;
@@ -54,7 +54,11 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Read incoming messages in a loop
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
-    let mut codec: Option<Flac> = None;
+    let mut codec: Box<dyn Codec> = Box::new(Wav::new(types::SampleFormat {
+        rate: 48000,
+        bits: 16,
+        channels: 2,
+    }));
     // let mut player = player::Player::new();
     loop {
         // Read the base message first
@@ -71,29 +75,22 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
                 match codec_header.codec.as_str() {
                     "pcm" => {
                         info!("pcm codec");
-                        // codec = Wav::from_header(codec_header);
-                        // info!("Sample format: {:?}", codec);
-                        // audiostream = Arc::new(Mutex::new(player::AudioStream::new(
-                        //     codec.as_ref().unwrap().sample_format,
-                        // )));
-                        // player.play(Arc::clone(&audiostream));
-
-                        // let audiostream =
-                        //     player::AudioStream::new(rx, codec.unwrap().sample_format);
-                        // player.play(audiostream);
+                        codec = Box::new(Wav::from_header(codec_header).unwrap());
+                        info!("Sample format: {}", codec.get_sampleformat());
+                        audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                            codec.as_ref().get_sampleformat(),
+                        )));
+                        player.play(Arc::clone(&audiostream));
                     }
                     "ogg" => warn!("ogg not implemented"),
                     "flac" => {
                         info!("flac codec");
-                        codec = Flac::from_header(codec_header);
-                        // info!("Sample format: {:?}", codec);
+                        codec = Box::new(Flac::from_header(codec_header).unwrap());
+                        info!("Sample format: {}", codec.get_sampleformat());
                         audiostream = Arc::new(Mutex::new(player::AudioStream::new(
-                            codec.as_ref().unwrap().sample_format,
+                            codec.as_ref().get_sampleformat(),
                         )));
                         player.play(Arc::clone(&audiostream));
-                        // let audiostream =
-                        //     player::AudioStream::new(rx, codec.unwrap().sample_format);
-                        // player.play(audiostream);
                     }
                     "opus" => warn!("opus not implemented"),
                     "null" => warn!("null not implemented"),
@@ -103,9 +100,7 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 // debug!("Received WireChunk message: {:?}", wire_chunk.base);
-                if let Some(ref mut c) = codec
-                    && let Some(pcm_chunk) = c.decode(wire_chunk)
-                {
+                if let Some(pcm_chunk) = codec.decode(wire_chunk) {
                     let mut audiostream = audiostream.lock().unwrap();
                     audiostream.add(pcm_chunk);
                 }
