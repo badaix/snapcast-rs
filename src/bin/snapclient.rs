@@ -3,16 +3,19 @@
 use std::error::Error;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clap::Parser;
 use log::{debug, error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+use anyhow::Result;
 use snapcast::codec::{Codec, Flac, Null, Wav};
 use snapcast::messages::{self, Message};
 use snapcast::player;
-use snapcast::types;
+use snapcast::types::{self, TimeStamp};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -32,25 +35,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Connects to the Snapcast server at the given host and port, sends a Hello message, and listens for incoming messages.
-pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn sync_time(mut write_stream: OwnedWriteHalf) -> Result<()> {
+    let mut id = 0;
+    loop {
+        let mut time = messages::Time::new();
+        time.base.id = id;
+        id += 1;
+        debug!("Sending Time message: {:?}", time);
+        let msg: Vec<u8> = time.serialize();
+        write_stream
+            .write_all(&msg)
+            .await
+            .expect("Failed to write message");
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+}
+
+async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
     let mut audiostream = Arc::new(Mutex::new(player::AudioStream::new(types::SampleFormat {
         rate: 4800,
         bits: 16,
         channels: 2,
     })));
     let mut player = player::Player::new();
-
-    let mac = mac_address::get_mac_address()?.unwrap().to_string();
-    let mut stream = TcpStream::connect(host).await?;
-    let hello = messages::Hello::new(
-        1,
-        0,
-        serde_json::json!({"Arch": "x86_64", "Auth": {"param": "YmFkYWl4OnBhc3N3ZA==", "scheme": "Basic"}, "ClientName": "Snapclient-rust", "HostName": hostname::get().unwrap().to_str(), "ID": mac, "Instance": 1, "MAC": mac, "OS": "Arch Linux", "SnapStreamProtocolVersion": 2, "Version": "0.32.0"}).to_string().as_str(),
-    );
-    debug!("Sending Hello message: {:?}", hello);
-    let msg: Vec<u8> = hello.serialize();
-    stream.write_all(&msg).await?;
 
     // Read incoming messages in a loop
     let mut base_buffer: [u8; 26] = [0; 26];
@@ -59,38 +66,37 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
     // let mut player = player::Player::new();
     loop {
         // Read the base message first
-        stream.read_exact(&mut base_buffer).await?;
-        let base_message = messages::BaseMessage::deserialize(&base_buffer);
+        read_stream.read_exact(&mut base_buffer).await?;
+        let mut base_message = messages::BaseMessage::deserialize(&base_buffer);
+        base_message.received = TimeStamp::now();
 
         // Resize the buffer to the size of the incoming message and read the rest of the message
         buffer.resize(base_message.size as usize, 0);
-        stream.read_exact(&mut buffer).await?;
+        read_stream.read_exact(&mut buffer).await?;
         match base_message.msgtype {
             messages::MessageType::CodecHeader => {
                 let codec_header = messages::CodecHeader::deserialize(base_message, &buffer);
-                debug!("Received CodecHeader message: {:?}", codec_header);
+                // debug!("Received CodecHeader message: {:?}", codec_header);
                 match codec_header.codec.as_str() {
                     "pcm" => {
-                        info!("pcm codec");
                         codec = Box::new(Wav::from_header(codec_header).unwrap());
-                        info!("Sample format: {}", codec.get_sampleformat());
+                        info!("{}", codec);
                         audiostream = Arc::new(Mutex::new(player::AudioStream::new(
                             codec.as_ref().get_sampleformat(),
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
                     "flac" => {
-                        info!("flac codec");
                         codec = Box::new(Flac::from_header(codec_header).unwrap());
-                        info!("Sample format: {}", codec.get_sampleformat());
+                        info!("{}", codec);
                         audiostream = Arc::new(Mutex::new(player::AudioStream::new(
                             codec.as_ref().get_sampleformat(),
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
                     "null" => {
-                        info!("null codec");
                         codec = Box::new(Null::new());
+                        info!("{}", codec);
                         audiostream = Arc::new(Mutex::new(player::AudioStream::new(
                             codec.as_ref().get_sampleformat(),
                         )));
@@ -112,11 +118,22 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
             messages::MessageType::ServerSettings => {
                 let server_settings = messages::ServerSettings::deserialize(base_message, &buffer);
                 debug!("Received ServerSettings message: {:?}", server_settings);
-                player.volume.store(server_settings.volume, Relaxed);
+                let vol = server_settings.volume as i16;
+                player
+                    .volume
+                    .store(if server_settings.muted { -vol } else { vol }, Relaxed);
             }
             messages::MessageType::Time => {
                 let time_message = messages::Time::deserialize(base_message, &buffer);
+                let latency_c2s = time_message.latency;
+                let latency_s2c = time_message.base.received - time_message.base.sent;
                 debug!("Received Time message: {:?}", time_message);
+                debug!(
+                    "Latency c2s: {:?}, s2c: {:?}, diff: {:?}",
+                    latency_c2s,
+                    latency_s2c,
+                    latency_c2s - latency_s2c
+                );
             }
             messages::MessageType::Hello => {
                 let hello_message = messages::Hello::deserialize(base_message, &buffer);
@@ -135,6 +152,25 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+}
 
-    // Ok(())
+/// Connects to the Snapcast server at the given host and port, sends a Hello message, and listens for incoming messages.
+pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mac = mac_address::get_mac_address()?.unwrap().to_string();
+    let stream = TcpStream::connect(host).await?;
+
+    let (read_stream, mut write_stream) = stream.into_split();
+    let mut hello = messages::Hello::new(
+        serde_json::json!({"Arch": "x86_64", "Auth": {"param": "YmFkYWl4OnBhc3N3ZA==", "scheme": "Basic"}, "ClientName": "Snapclient-rust", "HostName": hostname::get().unwrap().to_str(), "ID": mac, "Instance": 1, "MAC": mac, "OS": "Arch Linux", "SnapStreamProtocolVersion": 2, "Version": "0.32.0"}).to_string().as_str(),
+    );
+    debug!("Sending Hello message: {:?}", hello);
+    let msg: Vec<u8> = hello.serialize();
+    write_stream.write_all(&msg).await?;
+
+    tokio::spawn(async move {
+        sync_time(write_stream).await.expect("Sync time failed");
+    });
+
+    reader(read_stream).await?;
+    Ok(())
 }

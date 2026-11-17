@@ -5,7 +5,6 @@
 
 use crate::types::TimeStamp;
 use serde_json;
-use std::ops;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MessageType {
@@ -69,6 +68,15 @@ pub struct Time {
 pub struct Hello {
     pub base: BaseMessage,
     pub payload: String,
+    // pub arch: String,
+    // pub client_name: String,
+    // pub host_name: String,
+    // pub id: String,
+    // pub instance: u16,
+    // pub mac: String,
+    // pub os: String,
+    // pub protocol_version: u16,
+    // pub client_version: String,
     // {
     //     "Arch": "x86_64",
     //     "Auth": {
@@ -103,7 +111,7 @@ pub struct ErrorMessage {
 
 pub trait Message {
     fn deserialize(basemessage: BaseMessage, buffer: &[u8]) -> Self;
-    fn serialize(&self) -> Vec<u8>;
+    fn serialize(&mut self) -> Vec<u8>;
 }
 
 impl From<u16> for MessageType {
@@ -122,65 +130,19 @@ impl From<u16> for MessageType {
     }
 }
 
-impl TimeStamp {
-    fn new(sec: i32, usec: i32) -> Self {
-        TimeStamp { sec, usec }
-    }
-
-    fn now() -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        TimeStamp {
-            sec: now.as_secs() as i32,
-            usec: now.subsec_micros() as i32,
-        }
-    }
-
-    fn deserialize(buffer: &[u8]) -> Self {
-        let sec = i32::from_le_bytes(buffer[0..4].try_into().unwrap());
-        let usec = i32::from_le_bytes(buffer[4..8].try_into().unwrap());
-        TimeStamp { sec, usec }
-    }
-
-    fn serialize(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
-        buffer.extend_from_slice(&self.sec.to_le_bytes());
-        buffer.extend_from_slice(&self.usec.to_le_bytes());
-        buffer
-    }
-}
-
-impl ops::Sub<TimeStamp> for TimeStamp {
-    type Output = TimeStamp;
-
-    fn sub(self, other: TimeStamp) -> TimeStamp {
-        let mut sec = self.sec - other.sec;
-        let mut usec = self.usec - other.usec;
-        if usec < 0 {
-            sec -= 1;
-            usec += 1_000_000;
-        }
-        TimeStamp { sec, usec }
-    }
-}
-
-impl ops::Add<TimeStamp> for TimeStamp {
-    type Output = TimeStamp;
-
-    fn add(self, other: TimeStamp) -> TimeStamp {
-        let mut sec = self.sec + other.sec;
-        let mut usec = self.usec + other.usec;
-        if usec >= 1_000_000 {
-            sec += 1;
-            usec -= 1_000_000;
-        }
-        TimeStamp { sec, usec }
-    }
-}
-
 impl BaseMessage {
-    pub fn serialize(&self) -> Vec<u8> {
+    pub fn new(msgtype: MessageType) -> Self {
+        BaseMessage {
+            msgtype,
+            id: 0,
+            refers_to: 0,
+            sent: TimeStamp::now(),
+            received: TimeStamp::now(),
+            size: 0,
+        }
+    }
+
+    pub fn serialize(&mut self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&(self.msgtype as u16).to_le_bytes());
         buffer.extend_from_slice(&self.id.to_le_bytes());
@@ -222,7 +184,7 @@ impl Message for CodecHeader {
         }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         buffer.extend_from_slice(&self.codec.len().to_le_bytes());
         buffer.extend_from_slice(self.codec.as_bytes());
@@ -244,7 +206,7 @@ impl Message for WireChunk {
         }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         buffer.extend_from_slice(&self.timestamp.serialize());
         buffer.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
@@ -267,7 +229,7 @@ impl Message for ServerSettings {
         }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         let json = serde_json::json!({"bufferMs": &self.buffer_ms, "latency": &self.latency, "muted": self.muted, "volume": &self.volume});
         let json_str = json.to_string();
@@ -286,28 +248,47 @@ impl Message for Time {
         }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
+        self.base.sent = TimeStamp::now();
+        let payload = self.latency.serialize();
+        self.base.size = payload.len() as u32;
         let mut buffer = self.base.serialize();
-        buffer.extend_from_slice(&self.latency.serialize());
+        buffer.extend_from_slice(&payload);
         buffer
     }
 }
 
 impl Hello {
-    pub fn new(id: u16, refers_to: u16, payload: &str) -> Self {
-        let size = payload.len() as u32;
+    pub fn new(payload: &str) -> Self {
         Hello {
             // base: BaseMessage::new(1, id, refers_to),
-            base: BaseMessage {
-                msgtype: MessageType::Hello,
-                id,
-                refers_to,
-                sent: TimeStamp::new(0, 0),
-                received: TimeStamp::new(0, 0),
-                size: size + 4, // size of the payload plus the size field itself
-            },
+            base: BaseMessage::new(MessageType::Hello),
             payload: payload.to_string(),
+            // arch: String::new(),
+            // client_name: String::from_str("").unwrap(),
+            // host_name: String::from_str("").unwrap(),
+            // id: String::from_str("").unwrap(),
+            // instance: 1,
+            // mac: String::from_str("").unwrap(),
+            // os: String::from_str("").unwrap(),
+            // protocol_version: 2,
+            // client_version: String::from_str("").unwrap(),
         }
+    }
+}
+
+impl Time {
+    pub fn new() -> Self {
+        Time {
+            base: BaseMessage::new(MessageType::Time),
+            latency: TimeStamp::now(),
+        }
+    }
+}
+
+impl Default for Time {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -323,7 +304,7 @@ impl Message for ClientInfo {
         }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         let json = serde_json::json!({"volume": self.volume, "muted": self.muted});
         let json_str = json.to_string();
@@ -356,7 +337,7 @@ impl Message for ErrorMessage {
         }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
         let mut buffer = self.base.serialize();
         buffer.extend_from_slice(&self.code.to_le_bytes());
         buffer.extend_from_slice(&(self.message.len() as u32).to_le_bytes());
@@ -375,10 +356,44 @@ impl Message for Hello {
             base: basemessage,
             payload,
         }
+
+        // let json: serde_json::Value =
+        //     serde_json::from_slice(&buffer[4..(4 + payload_size as usize)]).unwrap();
+        // Hello {
+        //     base: basemessage,
+        //     arch: String::from_str(json["arch"].as_str().unwrap()).unwrap(),
+        //     client_name: String::from_str(json["ClientName"].as_str().unwrap()).unwrap(),
+        //     host_name: String::from_str(json["HostName"].as_str().unwrap()).unwrap(),
+        //     id: String::from_str(json["ID"].as_str().unwrap()).unwrap(),
+        //     instance: json["Instance"].as_i64().unwrap() as u16,
+        //     mac: String::from_str(json["MAC"].as_str().unwrap()).unwrap(),
+        //     os: String::from_str(json["OS"].as_str().unwrap()).unwrap(),
+        //     protocol_version: json["SnapStreamProtocolVersion"].as_i64().unwrap() as u16,
+        //     client_version: String::from_str(json["Version"].as_str().unwrap()).unwrap(),
+        // }
     }
 
-    fn serialize(&self) -> Vec<u8> {
+    fn serialize(&mut self) -> Vec<u8> {
+        self.base.size = self.payload.len() as u32 + 4;
         let mut buffer = self.base.serialize();
+
+        // let json = serde_json::json!(
+        // {
+        //     "Arch": &self.arch,
+        //     "ClientName": &self.client_name,
+        //     "HostName": &self.host_name,
+        //     "ID": &self.id,
+        //     "Instance": &self.instance,
+        //     "MAC": &self.mac,
+        //     "OS": &self.os,
+        //     "SnapStreamProtocolVersion": &self.protocol_version,
+        //     "Version": &self.client_version
+        // });
+
+        // let json_str = json.to_string();
+        // buffer.extend_from_slice(&(json_str.len() as u32).to_le_bytes());
+        // buffer.extend_from_slice(json_str.as_bytes());
+
         buffer.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
         buffer.extend_from_slice(self.payload.as_bytes());
         buffer

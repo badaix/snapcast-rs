@@ -3,7 +3,8 @@
 use crate::messages::{CodecHeader, WireChunk};
 use crate::types::{SampleFormat, TimeStamp};
 use anyhow::{Result, bail};
-use log::{debug, warn};
+use log::warn;
+use std::fmt;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{CODEC_TYPE_FLAC, CodecParameters, DecoderOptions};
 use symphonia::core::formats::Packet;
@@ -31,6 +32,18 @@ pub struct Flac {
 pub trait Codec {
     fn decode(&mut self, data: WireChunk) -> Option<PcmChunk>;
     fn get_sampleformat(&self) -> SampleFormat;
+    fn get_codec_name(&self) -> &str;
+}
+
+impl fmt::Display for dyn Codec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "codec: {}, sample format: {}",
+            self.get_codec_name(),
+            self.get_sampleformat()
+        )
+    }
 }
 
 impl Codec for Wav {
@@ -43,6 +56,10 @@ impl Codec for Wav {
 
     fn get_sampleformat(&self) -> SampleFormat {
         self.sample_format
+    }
+
+    fn get_codec_name(&self) -> &str {
+        "wav"
     }
 }
 
@@ -126,6 +143,10 @@ impl Codec for Null {
             channels: 2,
         }
     }
+
+    fn get_codec_name(&self) -> &str {
+        "null"
+    }
 }
 
 impl Codec for Flac {
@@ -166,6 +187,10 @@ impl Codec for Flac {
     fn get_sampleformat(&self) -> SampleFormat {
         self.sample_format
     }
+
+    fn get_codec_name(&self) -> &str {
+        "flac"
+    }
 }
 
 /// Parse FLAC STREAMINFO from a codec header payload.
@@ -201,7 +226,6 @@ fn parse_streaminfo(payload: &[u8]) -> Result<(SampleFormat, CodecParameters)> {
         bits: bits_per_sample as u16,
         channels: channels as u16,
     };
-    debug!("Flac sample format: {:?}", sf);
 
     let mut params = CodecParameters::new();
     params

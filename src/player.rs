@@ -2,18 +2,18 @@
 
 use std::{
     collections::VecDeque,
-    sync::atomic::{AtomicU16, Ordering::Relaxed},
+    sync::atomic::{AtomicI16, Ordering::Relaxed},
 };
 
+use crate::codec::PcmChunk;
+use crate::types::SampleFormat;
 use cpal::{
     Device, Error, ErrorKind, FromSample, OutputCallbackInfo, SizedSample, StreamConfig,
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
+// use log::debug;
 use std::sync::{Arc, Mutex};
-
-use crate::codec::PcmChunk;
-use crate::types::SampleFormat;
 
 pub struct AudioStream {
     sampleformat: SampleFormat,
@@ -51,14 +51,14 @@ impl AudioStream {
 
 pub struct Player {
     stream: Option<cpal::Stream>,
-    pub volume: Arc<AtomicU16>,
+    pub volume: Arc<AtomicI16>,
 }
 
 impl Player {
     pub fn new() -> Self {
         Player {
             stream: None,
-            volume: Arc::new(AtomicU16::new(100)),
+            volume: Arc::new(AtomicI16::new(100)),
         }
     }
 
@@ -97,7 +97,7 @@ impl Player {
         device: &Device,
         config: StreamConfig,
         audiostream: Arc<Mutex<AudioStream>>,
-        volume: Arc<AtomicU16>,
+        volume: Arc<AtomicI16>,
     ) -> Result<(), anyhow::Error>
     where
         T: SizedSample + FromSample<f32>,
@@ -118,7 +118,14 @@ impl Player {
                 // if info.xrun() {
                 //     eprintln!("output underrun");
                 // }
-                let vol: f32 = volume.load(Relaxed) as f32 / 100.;
+                // if muted, volume is set to -1 * volume
+                // debug!(
+                //     "Callback ts: {:?}, playback ts: {:?}, diff: {:?}",
+                //     _info.timestamp().callback,
+                //     _info.timestamp().playback,
+                //     _info.timestamp().playback - _info.timestamp().callback
+                // );
+                let vol: f32 = f32::max(volume.load(Relaxed) as f32 / 100., 0.);
                 // debug!("Callback, volume: {}", vol);
                 let mut audiostream = audiostream.lock().unwrap();
                 for frame in data.chunks_mut(channels) {
