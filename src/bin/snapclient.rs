@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clap::Parser;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
+use snapcast::timesync::TimeSync;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -23,16 +24,27 @@ struct Args {
     /// Snapserver host
     #[arg(long)]
     host: String,
+
+    #[arg(long, default_value = "info")]
+    loglevel: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
     let args = Args::parse();
-
     info!("Connecting to {}!", args.host);
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(args.loglevel))
+        .init();
     connect(&args.host).await?;
     Ok(())
+}
+
+async fn send<T: Message>(write_stream: &mut OwnedWriteHalf, message: &mut T) {
+    let msg: Vec<u8> = message.serialize();
+    write_stream
+        .write_all(&msg)
+        .await
+        .expect("Failed to write message");
 }
 
 async fn sync_time(mut write_stream: OwnedWriteHalf) -> Result<()> {
@@ -42,11 +54,7 @@ async fn sync_time(mut write_stream: OwnedWriteHalf) -> Result<()> {
         time.base.id = id;
         id += 1;
         debug!("Sending Time message: {:?}", time);
-        let msg: Vec<u8> = time.serialize();
-        write_stream
-            .write_all(&msg)
-            .await
-            .expect("Failed to write message");
+        send(&mut write_stream, &mut time).await;
         tokio::time::sleep(Duration::from_millis(1000)).await;
     }
 }
@@ -63,6 +71,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
     let mut codec: Box<dyn Codec> = Box::new(Null);
+    let mut timesync = TimeSync::new();
     // let mut player = player::Player::new();
     loop {
         // Read the base message first
@@ -110,6 +119,14 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 // debug!("Received WireChunk message: {:?}", wire_chunk.base);
+                let diff = timesync.get_diff();
+                let now = TimeStamp::now();
+                let local = wire_chunk.timestamp - diff;
+                let play = local - now + TimeStamp::new(1, 0);
+                trace!(
+                    "wirechunk ts: {:?}, diff: {:?}, now: {:?}, play: {:?}",
+                    wire_chunk.timestamp, local, now, play
+                );
                 if let Some(pcm_chunk) = codec.decode(wire_chunk) {
                     let mut audiostream = audiostream.lock().unwrap();
                     audiostream.add(pcm_chunk);
@@ -134,6 +151,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                     latency_s2c,
                     latency_c2s - latency_s2c
                 );
+                timesync.add(&latency_c2s, &latency_s2c);
             }
             messages::MessageType::Hello => {
                 let hello_message = messages::Hello::deserialize(base_message, &buffer);
@@ -164,8 +182,14 @@ pub async fn connect(host: &str) -> Result<(), Box<dyn std::error::Error>> {
         serde_json::json!({"Arch": "x86_64", "Auth": {"param": "YmFkYWl4OnBhc3N3ZA==", "scheme": "Basic"}, "ClientName": "Snapclient-rust", "HostName": hostname::get().unwrap().to_str(), "ID": mac, "Instance": 1, "MAC": mac, "OS": "Arch Linux", "SnapStreamProtocolVersion": 2, "Version": "0.32.0"}).to_string().as_str(),
     );
     debug!("Sending Hello message: {:?}", hello);
-    let msg: Vec<u8> = hello.serialize();
-    write_stream.write_all(&msg).await?;
+    send(&mut write_stream, &mut hello).await;
+
+    // for _i in 0..20 {
+    //     let mut time = messages::Time::new();
+    //     debug!("Sending Time message: {:?}", time);
+    //     send(&mut write_stream, &mut time).await;
+    //     tokio::time::sleep(Duration::from_millis(10)).await;
+    // }
 
     tokio::spawn(async move {
         sync_time(write_stream).await.expect("Sync time failed");

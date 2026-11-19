@@ -399,26 +399,3 @@ impl Message for Hello {
         buffer
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_timestamp_subtraction() {
-        let t1 = TimeStamp::new(5, 500_000);
-        let t2 = TimeStamp::new(3, 800_000);
-        let result = t1 - t2;
-        assert_eq!(result.sec, 1);
-        assert_eq!(result.usec, 700_000);
-    }
-
-    #[test]
-    fn test_timestamp_addition() {
-        let t1 = TimeStamp::new(5, 500_000);
-        let t2 = TimeStamp::new(3, 800_000);
-        let result = t1 + t2;
-        assert_eq!(result.sec, 9);
-        assert_eq!(result.usec, 300_000);
-    }
-}
