@@ -15,6 +15,7 @@ use anyhow::Result;
 use snapcast::codec::{Codec, Flac, Null, Wav};
 use snapcast::messages::{self, Message};
 use snapcast::player;
+use snapcast::stream::AudioStream;
 use snapcast::types::{self, TimeStamp};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
@@ -60,7 +61,7 @@ async fn sync_time(mut write_stream: OwnedWriteHalf) -> Result<()> {
 }
 
 async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
-    let mut audiostream = Arc::new(Mutex::new(player::AudioStream::new(types::SampleFormat {
+    let mut audiostream = Arc::new(Mutex::new(AudioStream::new(types::SampleFormat {
         rate: 4800,
         bits: 16,
         channels: 2,
@@ -90,7 +91,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                     "pcm" => {
                         codec = Box::new(Wav::from_header(codec_header).unwrap());
                         info!("{}", codec);
-                        audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                        audiostream = Arc::new(Mutex::new(AudioStream::new(
                             codec.as_ref().get_sampleformat(),
                         )));
                         player.play(Arc::clone(&audiostream));
@@ -98,7 +99,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                     "flac" => {
                         codec = Box::new(Flac::from_header(codec_header).unwrap());
                         info!("{}", codec);
-                        audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                        audiostream = Arc::new(Mutex::new(AudioStream::new(
                             codec.as_ref().get_sampleformat(),
                         )));
                         player.play(Arc::clone(&audiostream));
@@ -106,7 +107,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                     "null" => {
                         codec = Box::new(Null::new());
                         info!("{}", codec);
-                        audiostream = Arc::new(Mutex::new(player::AudioStream::new(
+                        audiostream = Arc::new(Mutex::new(AudioStream::new(
                             codec.as_ref().get_sampleformat(),
                         )));
                         player.play(Arc::clone(&audiostream));

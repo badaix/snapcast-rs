@@ -6,7 +6,7 @@ use crate::types::TimeStamp;
 // use log::debug;
 use std::collections::VecDeque;
 
-type TimeDiff = TimeStamp;
+pub type TimeDiff = TimeStamp;
 
 pub struct TimeSync {
     diffs: VecDeque<TimeDiff>,

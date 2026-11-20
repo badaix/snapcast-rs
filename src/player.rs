@@ -1,53 +1,15 @@
 //! Audio player based on cpal
 
-use std::{
-    collections::VecDeque,
-    sync::atomic::{AtomicI16, Ordering::Relaxed},
-};
+use std::sync::atomic::{AtomicI16, Ordering::Relaxed};
 
-use crate::codec::PcmChunk;
-use crate::types::SampleFormat;
 use cpal::{
     Device, Error, ErrorKind, FromSample, OutputCallbackInfo, SizedSample, StreamConfig,
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 // use log::debug;
+use crate::{stream::AudioStream, timesync::TimeDiff};
 use std::sync::{Arc, Mutex};
-
-pub struct AudioStream {
-    sampleformat: SampleFormat,
-    data: VecDeque<i16>,
-}
-
-impl AudioStream {
-    pub fn new(sampleformat: SampleFormat) -> Self {
-        AudioStream {
-            sampleformat,
-            data: VecDeque::new(),
-        }
-    }
-
-    pub fn add(&mut self, chunk: PcmChunk) {
-        for n in 0..chunk.payload.len() / 2 {
-            self.data.push_back(i16::from_le_bytes(
-                chunk.payload[2 * n..2 * n + 2].try_into().unwrap(),
-            ));
-        }
-    }
-
-    pub fn fetch_data(&mut self) {
-        // while let Ok(chunk) = self.rx.try_recv() {
-        //     // debug!("Received chunk: {}", chunk.payload.len());
-        //     for n in 0..chunk.payload.len() / 2 {
-        //         self.data.push_back(i16::from_le_bytes(
-        //             chunk.payload[2 * n..2 * n + 2].try_into().unwrap(),
-        //         ));
-        //     }
-        //     // debug!("data: {}", self.data.len());
-        // }
-    }
-}
 
 pub struct Player {
     stream: Option<cpal::Stream>,
@@ -114,7 +76,9 @@ impl Player {
 
         self.stream = Some(device.build_output_stream(
             config,
-            move |data: &mut [T], _info: &OutputCallbackInfo| {
+            move |data: &mut [T], info: &OutputCallbackInfo| {
+                let when = info.timestamp().playback - info.timestamp().callback;
+
                 // if info.xrun() {
                 //     eprintln!("output underrun");
                 // }
@@ -128,12 +92,15 @@ impl Player {
                 let vol: f32 = f32::max(volume.load(Relaxed) as f32 / 100., 0.);
                 // debug!("Callback, volume: {}", vol);
                 let mut audiostream = audiostream.lock().unwrap();
+                let samples = audiostream.get_player_cbunk(
+                    &TimeDiff::from_duration(when),
+                    (channels * data.chunks(channels).len()) as u32,
+                );
+                let mut sample_idx = 0;
                 for frame in data.chunks_mut(channels) {
                     for sample in frame.iter_mut() {
-                        let value: T = T::from_sample(
-                            audiostream.data.pop_front().unwrap_or(0) as f32 / 32768. * vol,
-                        );
-                        *sample = value;
+                        *sample = T::from_sample(samples[sample_idx] * vol);
+                        sample_idx += 1;
                     }
                 }
             },

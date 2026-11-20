@@ -3,7 +3,7 @@
 use std::{cmp::Ordering, fmt, ops};
 
 use std::sync::LazyLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static START: LazyLock<Instant> = LazyLock::new(Instant::now);
 
@@ -36,6 +36,13 @@ impl TimeStamp {
         TimeStamp {
             sec: now.as_secs() as i64,
             usec: now.subsec_micros() as i32,
+        }
+    }
+
+    pub fn from_duration(duration: Duration) -> Self {
+        TimeStamp {
+            sec: duration.as_secs() as i64,
+            usec: duration.subsec_micros() as i32,
         }
     }
 
