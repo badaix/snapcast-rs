@@ -94,7 +94,7 @@ impl Player {
                 let mut audiostream = audiostream.lock().unwrap();
                 let samples = audiostream.get_player_cbunk(
                     &TimeDiff::from_duration(when),
-                    (channels * data.chunks(channels).len()) as u32,
+                    data.chunks(channels).len() as u32,
                 );
                 let mut sample_idx = 0;
                 for frame in data.chunks_mut(channels) {

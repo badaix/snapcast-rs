@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clap::Parser;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, warn};
 use snapcast::timesync::TimeSync;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -61,18 +61,21 @@ async fn sync_time(mut write_stream: OwnedWriteHalf) -> Result<()> {
 }
 
 async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
-    let mut audiostream = Arc::new(Mutex::new(AudioStream::new(types::SampleFormat {
-        rate: 4800,
-        bits: 16,
-        channels: 2,
-    })));
+    let timesync = Arc::new(Mutex::new(TimeSync::new()));
+    let mut audiostream = Arc::new(Mutex::new(AudioStream::new(
+        types::SampleFormat {
+            rate: 4800,
+            bits: 16,
+            channels: 2,
+        },
+        Arc::clone(&timesync),
+    )));
     let mut player = player::Player::new();
 
     // Read incoming messages in a loop
     let mut base_buffer: [u8; 26] = [0; 26];
     let mut buffer = Vec::new();
     let mut codec: Box<dyn Codec> = Box::new(Null);
-    let mut timesync = TimeSync::new();
     // let mut player = player::Player::new();
     loop {
         // Read the base message first
@@ -93,6 +96,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                         info!("{}", codec);
                         audiostream = Arc::new(Mutex::new(AudioStream::new(
                             codec.as_ref().get_sampleformat(),
+                            Arc::clone(&timesync),
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
@@ -101,6 +105,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                         info!("{}", codec);
                         audiostream = Arc::new(Mutex::new(AudioStream::new(
                             codec.as_ref().get_sampleformat(),
+                            Arc::clone(&timesync),
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
@@ -109,6 +114,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                         info!("{}", codec);
                         audiostream = Arc::new(Mutex::new(AudioStream::new(
                             codec.as_ref().get_sampleformat(),
+                            Arc::clone(&timesync),
                         )));
                         player.play(Arc::clone(&audiostream));
                     }
@@ -120,14 +126,14 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
             messages::MessageType::WireChunk => {
                 let wire_chunk = messages::WireChunk::deserialize(base_message, &buffer);
                 // debug!("Received WireChunk message: {:?}", wire_chunk.base);
-                let diff = timesync.get_diff();
-                let now = TimeStamp::now();
-                let local = wire_chunk.timestamp - diff;
-                let play = local - now + TimeStamp::new(1, 0);
-                trace!(
-                    "wirechunk ts: {:?}, diff: {:?}, now: {:?}, play: {:?}",
-                    wire_chunk.timestamp, local, now, play
-                );
+                // let diff = timesync.get_diff();
+                // let now = TimeStamp::now();
+                // let local = wire_chunk.timestamp - diff;
+                // let play = local - now + TimeStamp::new(1, 0);
+                // trace!(
+                //     "wirechunk ts: {:?}, diff: {:?}, now: {:?}, play: {:?}",
+                //     wire_chunk.timestamp, local, now, play
+                // );
                 if let Some(pcm_chunk) = codec.decode(wire_chunk) {
                     let mut audiostream = audiostream.lock().unwrap();
                     audiostream.add(pcm_chunk);
@@ -152,7 +158,7 @@ async fn reader(mut read_stream: OwnedReadHalf) -> Result<()> {
                     latency_s2c,
                     latency_c2s - latency_s2c
                 );
-                timesync.add(&latency_c2s, &latency_s2c);
+                timesync.lock().unwrap().add(&latency_c2s, &latency_s2c);
             }
             messages::MessageType::Hello => {
                 let hello_message = messages::Hello::deserialize(base_message, &buffer);
