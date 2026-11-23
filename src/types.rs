@@ -98,6 +98,30 @@ impl ops::Add<TimeStamp> for TimeStamp {
     }
 }
 
+impl ops::Add<Duration> for TimeStamp {
+    type Output = TimeStamp;
+
+    fn add(self, other: Duration) -> TimeStamp {
+        let ts = TimeStamp::from_duration(other);
+        self + ts
+    }
+}
+
+impl ops::Sub<Duration> for TimeStamp {
+    type Output = TimeStamp;
+
+    fn sub(self, other: Duration) -> TimeStamp {
+        let ts = TimeStamp::from_duration(other);
+        self - ts
+    }
+}
+
+impl fmt::Display for TimeStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{:06}s", self.sec, self.usec)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +162,23 @@ mod tests {
         let t1 = TimeStamp::new(1, 100_000);
         let t2 = TimeStamp::new(1, 200_000);
         assert!(t1 < t2);
+    }
+
+    #[test]
+    fn test_timestamp_plus_duration() {
+        let t = TimeStamp::new(5, 500_000);
+        let d = Duration::from_millis(3800);
+        let result = t + d;
+        assert_eq!(result.sec, 9);
+        assert_eq!(result.usec, 300_000);
+    }
+
+    #[test]
+    fn test_timestamp_minus_duration() {
+        let t = TimeStamp::new(5, 500_000);
+        let d = Duration::from_millis(3800);
+        let result = t - d;
+        assert_eq!(result.sec, 1);
+        assert_eq!(result.usec, 700_000);
     }
 }

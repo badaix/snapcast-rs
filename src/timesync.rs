@@ -50,6 +50,10 @@ impl TimeSync {
     pub fn get_diff(&self) -> TimeDiff {
         self.diff
     }
+
+    pub fn server_now(&self) -> TimeStamp {
+        TimeDiff::now() + self.diff
+    }
 }
 
 impl Default for TimeSync {

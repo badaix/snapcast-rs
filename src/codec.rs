@@ -4,7 +4,8 @@ use crate::messages::{CodecHeader, WireChunk};
 use crate::types::{SampleFormat, TimeStamp};
 use anyhow::{Result, bail};
 use log::warn;
-use std::fmt;
+use std::time::Duration;
+use std::{cmp, fmt};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{CODEC_TYPE_FLAC, CodecParameters, DecoderOptions};
 use symphonia::core::formats::Packet;
@@ -12,7 +13,56 @@ use symphonia::core::formats::Packet;
 #[derive(Debug)]
 pub struct PcmChunk {
     pub timestamp: TimeStamp,
+    pub sampleformat: SampleFormat,
     pub payload: Vec<u8>,
+    pub cursor: usize,
+}
+
+impl PcmChunk {
+    pub fn frames_left(&self) -> u16 {
+        self.frame_count() - self.frame_pos()
+    }
+
+    pub fn frame_pos(&self) -> u16 {
+        self.cursor as u16 / self.get_framesize()
+    }
+
+    pub fn frame_count(&self) -> u16 {
+        self.payload.len() as u16 / self.get_framesize()
+    }
+
+    pub fn get_duration(&self) -> Duration {
+        let ms = self.frame_count() as f32 / (self.sampleformat.rate as f32 * 1_000_000.);
+        Duration::from_micros(ms as u64)
+    }
+
+    pub fn get_position(&self) -> Duration {
+        let ms = self.frame_pos() as f32 / self.sampleformat.rate as f32 * 1_000_000.;
+        Duration::from_micros(ms as u64)
+    }
+
+    pub fn get_left(&self) -> Duration {
+        self.get_duration() - self.get_position()
+    }
+
+    pub fn get_framesize(&self) -> u16 {
+        (self.sampleformat.bits / 8) * self.sampleformat.channels
+    }
+
+    pub fn read_frames(&mut self, frames: u32, data: &mut Vec<f32>) -> u32 {
+        let frames = cmp::min(frames as u16, self.frames_left()) as u32;
+        let samples = (frames * self.sampleformat.channels as u32) as usize;
+        for i in 0..samples {
+            let ival = i16::from_le_bytes(
+                self.payload[2 * i + self.cursor..2 * i + self.cursor + 2]
+                    .try_into()
+                    .unwrap(),
+            );
+            data.push(ival as f32 / 32768.);
+        }
+        self.cursor += 2 * samples;
+        frames
+    }
 }
 
 #[derive(Debug)]
@@ -50,7 +100,9 @@ impl Codec for Wav {
     fn decode(&mut self, data: WireChunk) -> Option<PcmChunk> {
         Some(PcmChunk {
             timestamp: data.timestamp,
+            sampleformat: self.sample_format,
             payload: data.payload,
+            cursor: 0,
         })
     }
 
@@ -180,7 +232,9 @@ impl Codec for Flac {
 
         Some(PcmChunk {
             timestamp: data.timestamp,
+            sampleformat: self.sample_format,
             payload: out,
+            cursor: 0,
         })
     }
 

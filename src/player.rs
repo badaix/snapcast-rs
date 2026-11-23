@@ -2,13 +2,13 @@
 
 use std::sync::atomic::{AtomicI16, Ordering::Relaxed};
 
+use crate::stream::AudioStream;
 use cpal::{
     Device, Error, ErrorKind, FromSample, OutputCallbackInfo, SizedSample, StreamConfig,
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-// use log::debug;
-use crate::{stream::AudioStream, timesync::TimeDiff};
+use log::debug;
 use std::sync::{Arc, Mutex};
 
 pub struct Player {
@@ -83,19 +83,17 @@ impl Player {
                 //     eprintln!("output underrun");
                 // }
                 // if muted, volume is set to -1 * volume
-                // debug!(
-                //     "Callback ts: {:?}, playback ts: {:?}, diff: {:?}",
-                //     _info.timestamp().callback,
-                //     _info.timestamp().playback,
-                //     _info.timestamp().playback - _info.timestamp().callback
-                // );
+                debug!(
+                    "Callback ts: {:?}, playback ts: {:?}, diff: {:?}",
+                    info.timestamp().callback,
+                    info.timestamp().playback,
+                    info.timestamp().playback - info.timestamp().callback
+                );
                 let vol: f32 = f32::max(volume.load(Relaxed) as f32 / 100., 0.);
                 // debug!("Callback, volume: {}", vol);
                 let mut audiostream = audiostream.lock().unwrap();
-                let samples = audiostream.get_player_cbunk(
-                    &TimeDiff::from_duration(when),
-                    data.chunks(channels).len() as u32,
-                );
+                let samples =
+                    audiostream.get_player_cbunk(when, data.chunks(channels).len() as u32);
                 let mut sample_idx = 0;
                 for frame in data.chunks_mut(channels) {
                     for sample in frame.iter_mut() {
