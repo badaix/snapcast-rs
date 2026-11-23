@@ -15,7 +15,6 @@ env_logger = { version = "0.11.2", default-features = false, features = [
     "auto-color",
 ] }
 anyhow = "1.0.104"
-rand = "0.10.3"
 hostname = "0.4.2"
 mac_address = "1.2.1"
 symphonia = { version = "0.5", features = ["flac", "pcm", "ogg", "vorbis"] }
