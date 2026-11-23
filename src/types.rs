@@ -58,6 +58,16 @@ impl TimeStamp {
         buffer.extend_from_slice(&self.usec.to_le_bytes());
         buffer
     }
+
+    pub fn to_duration(&self) -> Option<Duration> {
+        if self.sec < 0 {
+            None
+        } else {
+            Some(Duration::from_micros(
+                self.sec as u64 * 1_000_000_u64 + self.usec as u64,
+            ))
+        }
+    }
 }
 
 impl PartialOrd for TimeStamp {

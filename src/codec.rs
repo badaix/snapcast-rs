@@ -41,6 +41,10 @@ impl PcmChunk {
         Duration::from_micros(ms as u64)
     }
 
+    pub fn get_abs_position(&self) -> Duration {
+        self.timestamp.to_duration().unwrap() + self.get_position()
+    }
+
     pub fn get_left(&self) -> Duration {
         self.get_duration() - self.get_position()
     }

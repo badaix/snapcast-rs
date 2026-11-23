@@ -8,7 +8,7 @@ use cpal::{
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use log::debug;
+use log::trace;
 use std::sync::{Arc, Mutex};
 
 pub struct Player {
@@ -83,7 +83,7 @@ impl Player {
                 //     eprintln!("output underrun");
                 // }
                 // if muted, volume is set to -1 * volume
-                debug!(
+                trace!(
                     "Callback ts: {:?}, playback ts: {:?}, diff: {:?}",
                     info.timestamp().callback,
                     info.timestamp().playback,
