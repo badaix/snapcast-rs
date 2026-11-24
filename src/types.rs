@@ -68,6 +68,14 @@ impl TimeStamp {
             ))
         }
     }
+
+    pub fn as_micros(&self) -> i64 {
+        self.sec * 1_000_000 + self.usec as i64
+    }
+
+    pub fn as_millis(&self) -> i64 {
+        self.sec * 1_000 + self.usec as i64 / 1_000_i64
+    }
 }
 
 impl PartialOrd for TimeStamp {
