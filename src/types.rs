@@ -14,6 +14,17 @@ pub struct SampleFormat {
     pub channels: u16,
 }
 
+impl SampleFormat {
+    pub fn get_framesize(&self) -> u16 {
+        let mut bits = self.bits;
+        if bits == 24 {
+            bits = 32;
+        }
+
+        bits / 8 * self.channels
+    }
+}
+
 impl fmt::Display for SampleFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}:{}", self.rate, self.bits, self.channels)

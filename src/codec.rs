@@ -50,7 +50,7 @@ impl PcmChunk {
     }
 
     pub fn get_framesize(&self) -> u16 {
-        (self.sampleformat.bits / 8) * self.sampleformat.channels
+        self.sampleformat.get_framesize()
     }
 
     pub fn read_frames(&mut self, frames: u32, data: &mut Vec<f32>) -> u32 {

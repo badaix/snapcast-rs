@@ -52,7 +52,7 @@ impl Statistics {
             let mut v = Vec::from(self.diffs.clone());
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             self.median = Some(v[v.len() / 2]);
-            info!(target: "stats", "Stats - Chunk: {}, samples: {}", self.median.unwrap() / 100, v.len());
+            info!(target: "stats", "Chunk: {} \tsamples: {}", self.median.unwrap() / 100, v.len());
         }
     }
 
