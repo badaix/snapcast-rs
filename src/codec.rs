@@ -67,6 +67,13 @@ impl PcmChunk {
         self.cursor += 2 * samples;
         frames
     }
+
+    pub fn skip_frames(&mut self, frames: u32) -> u32 {
+        let frames = cmp::min(frames as u16, self.frames_left()) as u32;
+        let samples = (frames * self.sampleformat.channels as u32) as usize;
+        self.cursor += 2 * samples;
+        frames
+    }
 }
 
 #[derive(Debug)]
