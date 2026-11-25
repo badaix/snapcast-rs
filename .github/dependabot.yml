@@ -19,6 +19,8 @@ updates:
       interval: weekly
       day: saturday
       time: "10:00"
+    ignore:
+      - dependency-name: "symphonia"
     groups:
       all-cargo:
         patterns: ["*"]
