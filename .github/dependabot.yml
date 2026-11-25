@@ -18,6 +18,9 @@ updates:
     schedule:
       interval: weekly
       day: saturday
-      time: "10:00"
+      time: "10:00
+    groups:
+      all-cargo:
+        patterns: ["*"]
     open-pull-requests-limit: 10
     target-branch: develop
