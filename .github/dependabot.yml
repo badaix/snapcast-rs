@@ -13,3 +13,11 @@ updates:
       time: "10:00"
     open-pull-requests-limit: 10
     target-branch: develop
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: saturday
+      time: "10:00"
+    open-pull-requests-limit: 10
+    target-branch: develop
