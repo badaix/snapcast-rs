@@ -9,25 +9,25 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub struct Statistics {
-    diffs: VecDeque<i64>,
+    diffs: VecDeque<(i64, u32)>,
     last_log: TimeStamp,
     median: Option<i64>,
-    samples: usize,
-}
-
-impl Default for Statistics {
-    fn default() -> Self {
-        Self::new()
-    }
+    samples: u32,
+    diff_frames: i32,
+    sampleformat: SampleFormat,
+    frames_to_add: i32,
 }
 
 impl Statistics {
-    pub fn new() -> Self {
+    pub fn new(sampleformat: SampleFormat) -> Self {
         Statistics {
             diffs: VecDeque::new(),
             last_log: TimeStamp::now(),
             median: None,
-            samples: 50,
+            samples: 0,
+            diff_frames: 0,
+            sampleformat,
+            frames_to_add: 0,
         }
     }
 
@@ -36,10 +36,11 @@ impl Statistics {
         self.median = None;
     }
 
-    pub fn add(&mut self, diff: TimeDiff) {
-        self.diffs.push_back(diff.as_micros());
-        if self.diffs.len() > self.samples {
-            self.diffs.pop_front();
+    pub fn add(&mut self, diff: (TimeDiff, u32)) {
+        self.diffs.push_back((diff.0.as_micros(), diff.1));
+        self.samples = self.diffs.iter().map(|n| n.1).sum::<u32>();
+        while !self.diffs.is_empty() && self.samples > self.sampleformat.rate + diff.1 {
+            self.samples -= self.diffs.pop_front().unwrap_or((0, 0)).1;
         }
         self.calc_median();
     }
@@ -48,21 +49,34 @@ impl Statistics {
         let now = TimeStamp::now();
         if now - self.last_log > TimeDiff::new(1, 0) && !self.diffs.is_empty() {
             self.last_log = now;
-            // let sum = self.diffs[9] + self.diffs[2];
             let mut v = Vec::from(self.diffs.clone());
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            self.median = Some(v[v.len() / 2]);
-            info!(target: "stats", "Chunk: {} \tsamples: {}", self.median.unwrap() / 100, v.len());
+            v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            self.median = Some(v[v.len() / 2].0);
+            self.diff_frames =
+                (self.median.unwrap() as i32 * self.sampleformat.rate as i32) / 1_000_000;
+            self.samples = self.diffs.iter().map(|n| n.1).sum::<u32>();
+            if self.median.unwrap().unsigned_abs() / 100 > 1 {
+                self.frames_to_add = self.diff_frames;
+            } else {
+                self.frames_to_add = 0
+            }
+            info!(target: "stats", "Chunk: {} \tdiff frames: {} \tsamples: {} \tx: {}", self.median.unwrap() / 100, self.diff_frames, v.len(), self.samples);
         }
     }
 
     pub fn get_diff(&mut self) -> Option<i64> {
         self.calc_median();
-        if self.diffs.len() == self.samples && self.median.is_some() {
+        if self.samples >= self.sampleformat.rate && self.median.is_some() {
             self.median
         } else {
             None
         }
+    }
+
+    pub fn frames_to_add(&mut self) -> i32 {
+        let result = self.frames_to_add;
+        self.frames_to_add = 0;
+        result
     }
 }
 
@@ -81,7 +95,7 @@ impl AudioStream {
             chunks: VecDeque::new(),
             timesync,
             diff2server: TimeDiff::new(0, 0),
-            stats: Statistics::new(),
+            stats: Statistics::new(sampleformat),
         }
     }
 
@@ -109,7 +123,7 @@ impl AudioStream {
 
             let buffer_duration = TimeDiff::from_duration(Duration::from_millis(1000));
             let delta = playout_time - buffer_duration;
-            self.stats.add(delta);
+            self.stats.add((delta, frames));
             let frames_delta =
                 (delta.as_micros() as f32 * self.sampleformat.rate as f32 / 1_000_000_f32) as isize;
             trace!(
@@ -173,6 +187,16 @@ impl AudioStream {
                 chunk.frames_left(),
                 age
             );
+            let frames_to_add = self.stats.frames_to_add();
+            if frames_to_add > 0 {
+                info!("frames_to_add > 0, skipping frame");
+                chunk.skip_frames(1);
+            } else if frames_to_add < 0 {
+                info!("frames_to_add < 0, duplicating frame");
+                frames_read += chunk.read_frames(1, &mut result);
+                result.push(*result.last().unwrap());
+                frames_read += 1;
+            }
             frames_read += chunk.read_frames(to_read - frames_read, &mut result);
             trace!("get_player_cbunk - frames read: {}", frames_read);
             if chunk.frames_left() == 0 {
